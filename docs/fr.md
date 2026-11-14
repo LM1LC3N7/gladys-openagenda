@@ -69,7 +69,7 @@ une requête à la fois, 2 s au moins entre deux. Après un échec : nouvel essa
 (404) attend directement l’intervalle. Les textes sont nettoyés (balises HTML,
 entités, caractères invisibles ou d’inversion d’écriture retirés). Un événement
 vu deux fois (pages qui se recouvrent) ne compte qu’une fois ; une page vide qui
-annonce une suite, ou une suite servie deux fois, est une lecture coupée (rien
+annonce une suite (sauf si l’API a donné le total et que tout est arrivé), ou une suite servie deux fois, est une lecture coupée (rien
 n’est envoyé, nouvel essai comme après un échec). Quand le plafond de
 créneaux est atteint avant la fin des pages, les événements de la veille sont lus
 à part (l’API les range en dernier). Un redémarrage, une

@@ -25,6 +25,12 @@
 - [ ] A private agenda the key can read is not listed by `/v2/agendas`: named
       "OpenAgenda <uid>" (read all the same).
 
+- [ ] Last page (review r3): the docs promise `after: null` on the last answer.
+      An empty page with a cursor is taken as the end only when `total` is
+      given and every event came; otherwise the read counts as cut short
+      ("unreadable answer"). If a real agenda of exactly 100, 200… events stays
+      "unreadable", the API ends lists that way without `total`: revisit.
+
 ## Decisions
 
 - Version 0.1.0 set by hand (package.json, lock, manifest, docker_image).

@@ -740,7 +740,9 @@ test('r1 I3: /data written under its read bound, never unreadable at restart', a
     });
   }
   assert.equal(await env.app.save(), true);
+  assert.equal(await env.app.save(), true);
   assert.ok(Buffer.byteLength(JSON.stringify(store.data)) <= MAX_SAVE_BYTES);
+  assert.equal(env.lines.filter((l) => l.includes('/data bound reached')).length, 1, 'said once');
   assert.ok(App && packOccurrences);
   // A recurring event costs its texts once.
   const packed = packOccurrences(
@@ -937,14 +939,14 @@ test('r1 M6: the cap reached early, yesterday is still read', async (t) => {
 
 test('r2: an empty page with a cursor, or a cursor served again, is a read cut short', async (t) => {
   for (const second of [
-    () => page([], ['c9']),
-    () => page([event({ uid: 5, timings: [[NOW + DAY, NOW + DAY + HOUR]] })], ['c1']),
+    () => page([], ['c9'], 250),
+    () => page([event({ uid: 5, timings: [[NOW + DAY, NOW + DAY + HOUR]] })], ['c1'], 250),
   ]) {
     const env = await start(t);
     env.source.events = (r) =>
       r.u.searchParams.has('after[]')
         ? second()
-        : page([event({ uid: 6, timings: [[NOW + DAY, NOW + DAY + HOUR]] })], ['c1']);
+        : page([event({ uid: 6, timings: [[NOW + DAY, NOW + DAY + HOUR]] })], ['c1'], 250);
     await env.wait(6 * HOUR + MINUTE);
     assert.equal(env.events().length, 4, 'nothing pushed nor pruned');
     assert.match(statusText(env), /1 in error \(unreadable answer\)/);
@@ -1013,4 +1015,91 @@ test('r2: back to the read before a half-failed push: written again, never taken
   await env.wait(6 * HOUR);
   assert.equal(env.events().length, 4, 'exactly the read again');
   assert.ok(env.events().every((e) => e.name !== 'B'));
+});
+
+// --- Review r3 ---------------------------------------------------------------
+
+const failingEvents = (env) => {
+  const calls = [];
+  env.gladys.publishCalendarEvents = async () => {
+    calls.push(env.clock.elapsed);
+    throw Object.assign(new Error('boom'), { name: 'GladysApiError', status: 500 });
+  };
+  return calls;
+};
+
+test('r3: retries of a calendar not taken: 5, 15, 30, 60 min, then hourly, one timer', async (t) => {
+  const env = await start(t);
+  const calls = failingEvents(env);
+  const day = Math.floor(NOW / DAY) * DAY;
+  env.source.eventList = [event({ uid: 80, timings: [[day + DAY, day + DAY + HOUR]] })];
+  await env.wait(6 * HOUR + SECOND);
+  assert.equal(calls.length, 1);
+  // Account events while it waits: no second timer.
+  for (let i = 0; i < 3; i += 1) {
+    await env.gladys.fake.calendarAccountUpdated('alice');
+    await env.wait(SECOND);
+  }
+  const base = calls.length;
+  await env.wait(3 * HOUR);
+  const gaps = calls
+    .slice(base - 1)
+    .map((x, i, a) => (i === 0 ? null : Math.round((x - a[i - 1]) / MINUTE)))
+    .slice(1);
+  const first = Math.round((calls[base] - calls[0]) / MINUTE);
+  assert.equal(first, 5, 'first retry 5 min after the failed push');
+  assert.deepEqual(gaps.slice(1, 5), [15, 30, 60, 60]);
+});
+
+test('r3: a user who leaves while a calendar is due: no more retries, warning gone', async (t) => {
+  const env = await start(t);
+  const calls = failingEvents(env);
+  const day = Math.floor(NOW / DAY) * DAY;
+  env.source.eventList = [event({ uid: 81, timings: [[day + DAY, day + DAY + HOUR]] })];
+  await env.wait(6 * HOUR + SECOND);
+  assert.match(statusText(env), /Gladys refused/);
+  env.gladys.fake.calendarAccounts = [];
+  env.gladys.fake.calendars = [];
+  await env.gladys.fake.calendarAccountUpdated('alice');
+  await env.wait(SECOND);
+  const n = calls.length;
+  await env.wait(3 * HOUR);
+  assert.equal(calls.length, n);
+  assert.doesNotMatch(statusText(env), /Gladys refused/);
+});
+
+test('r3: a calendar delete that fails is due and done 5 min later', async (t) => {
+  const env = await start(t);
+  const original = env.gladys.deleteCalendar.bind(env.gladys);
+  let fail = 1;
+  env.gladys.deleteCalendar = async (...args) => {
+    if (fail-- > 0) throw Object.assign(new Error('boom'), { name: 'GladysApiError', status: 500 });
+    return original(...args);
+  };
+  env.source.agendaList.push({ uid: 777, slug: 'autre', title: 'Autre agenda' });
+  env.gladys.fake.calendarAccounts = [account('alice', 'autre')];
+  await env.gladys.fake.calendarAccountUpdated('alice');
+  await env.wait(10 * SECOND);
+  assert.equal(env.gladys.fake.calendars.length, 2);
+  assert.match(statusText(env), /Gladys refused/);
+  await env.wait(5 * MINUTE);
+  assert.deepEqual(
+    env.gladys.fake.calendars.map((c) => c.name),
+    ['Autre agenda'],
+  );
+  assert.doesNotMatch(statusText(env), /Gladys refused/);
+});
+
+test('r3: an empty page with a cursor ends the list when total is given and reached', async (t) => {
+  const env = await setup({ start: false });
+  t.after(() => teardown(env));
+  const day = Math.floor(NOW / DAY) * DAY;
+  env.source.events = (r) =>
+    r.u.searchParams.has('after[]')
+      ? page([], ['c2'], 1)
+      : page([event({ uid: 90, timings: [[day + DAY, day + DAY + HOUR]] })], ['c1'], 1);
+  await env.gladys.connect();
+  await env.wait(20 * SECOND);
+  assert.equal(env.events().length, 1);
+  assert.equal(env.status().connected, true);
 });

@@ -338,7 +338,61 @@
   {
     "name": "R2-6: empty page with a cursor taken as the end",
     "file": "src/app.js",
-    "from": "if (result.events.length === 0) throw new DataError('Empty page before the end');",
-    "to": "if (result.events.length === 0) return 'end';"
+    "from": "          throw new DataError('Empty page before the end');",
+    "to": "          return 'end';"
+  },
+  {
+    "name": "r3: departed user's due calendar kept due",
+    "file": "src/app.js",
+    "from": "for (const [id, user] of this.due) if (!this.accounts.has(user)) this.due.delete(id);",
+    "to": ""
+  },
+  {
+    "name": "r3: second retry timer allowed (no guard)",
+    "file": "src/app.js",
+    "from": "    if (this.pushTimer) return;\n    this.pushFailures += 1;",
+    "to": "    this.pushFailures += 1;"
+  },
+  {
+    "name": "r3: retry steps flat 5 min",
+    "file": "src/app.js",
+    "from": "const wait = RETRY_STEPS[Math.min(this.pushFailures, RETRY_STEPS.length) - 1];",
+    "to": "const wait = RETRY_STEPS[0];"
+  },
+  {
+    "name": "r3: failed delete not due",
+    "file": "src/app.js",
+    "from": "          } else if (result === 'failed') {\n            this.due.set(id, account.user);\n          }",
+    "to": "          }"
+  },
+  {
+    "name": "r3: warning never cleared",
+    "file": "src/app.js",
+    "from": "      if (this.gladysError) {\n        this.gladysError = false;",
+    "to": "      if (false) {\n        this.gladysError = false;"
+  },
+  {
+    "name": "r3: repeated cursor taken as end",
+    "file": "src/app.js",
+    "from": "if (seen.has(key)) throw new DataError('Page cursor served again');",
+    "to": "if (seen.has(key)) return 'end';"
+  },
+  {
+    "name": "r3: data bound warning every save",
+    "file": "src/app.js",
+    "from": "    if (size <= MAX_SAVE_BYTES) this.dataBound = false;",
+    "to": "    this.dataBound = false;"
+  },
+  {
+    "name": "R3-2: empty page always the end",
+    "file": "src/app.js",
+    "from": "if (result.total !== undefined && received >= result.total) return 'end';",
+    "to": "return 'end';"
+  },
+  {
+    "name": "R3-2: total ignored",
+    "file": "src/app.js",
+    "from": "if (result.total !== undefined && received >= result.total) return 'end';",
+    "to": ""
   }
 ]

@@ -47,6 +47,9 @@ the notes of the version's GitHub Release.
   taken as sent half-way; an empty page announcing more, or a cursor served
   again, is a read cut short; only real HTML tags removed ("< 12 ans" kept);
   the /data bound warning once per crossing; status text of the retries.
+- Review r3: an empty page with a cursor ends the list when the API gave
+  `total` and every event came; tests for the retry steps, one retry timer, a
+  user leaving while a calendar is due and a failed calendar delete.
 - `countries: ["FR", "BE", "CH", "LU"]` in the manifest (Gladys 5.3.0 or later).
 
 [Unreleased]: https://github.com/LM1LC3N7/gladys-openagenda/commits/main

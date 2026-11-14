@@ -1096,6 +1096,7 @@ export class App {
     const readRange = async (lo, hi, { early, pages }) => {
       let after;
       const seen = new Set();
+      let received = 0;
       for (let page = 0; ; page += 1) {
         if (page >= pages) return 'cut';
         const json = await this.ask(
@@ -1104,6 +1105,7 @@ export class App {
         );
         if (gen !== this.generation) return 'stopped';
         const result = parseEventsPage(json);
+        received += result.events.length;
         // The latest first upcoming occurrence of this page: the next pages start later.
         let pageFirst = -Infinity;
         for (const event of result.events) {
@@ -1126,7 +1128,11 @@ export class App {
         if (!after) return 'end';
         // A cursor with an empty page, or a cursor served again: the list is
         // cut short, never taken as its end (it would prune the rest).
-        if (result.events.length === 0) throw new DataError('Empty page before the end');
+        // Unless the API said how many there are and all came.
+        if (result.events.length === 0) {
+          if (result.total !== undefined && received >= result.total) return 'end';
+          throw new DataError('Empty page before the end');
+        }
         // A cursor served twice would loop: the list ends there.
         const key = after.join('\u0000');
         if (seen.has(key)) throw new DataError('Page cursor served again');

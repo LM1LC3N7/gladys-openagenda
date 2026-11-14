@@ -67,7 +67,7 @@ at a time, 2 s apart at least. After a failure: tried again 5 min, 15 min,
 30 min, 1 h later, then at the interval; an agenda not found (404) waits the
 interval at once. Texts are cleaned (HTML tags, entities, invisible and
 direction-changing characters removed). An event seen twice (pages that overlap)
-counts once; an empty page announcing more, or the same next page served twice,
+counts once; an empty page announcing more (unless the API gave the total and all came), or the same next page served twice,
 is a read cut short (nothing sent, tried again as after a failure). When the time-slot cap is reached before the last page, yesterday's
 events are read on their own (the API lists them last). A restart, a reconnection, a new
 account following an agenda already read or a toggle start no read: the last
