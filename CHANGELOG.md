@@ -42,6 +42,11 @@ the notes of the version's GitHub Release.
   nothing; HTML tags, entities and bidi characters cleaned; 429 in a row
   lengthen the pause; a read that changes nothing writes nothing; yesterday's
   events read on their own when the cap stops the pages early.
+- Review r2: a calendar Gladys did not take stays due on its own until it goes
+  through (another agenda pushed meanwhile no longer clears it), and is never
+  taken as sent half-way; an empty page announcing more, or a cursor served
+  again, is a read cut short; only real HTML tags removed ("< 12 ans" kept);
+  the /data bound warning once per crossing; status text of the retries.
 - `countries: ["FR", "BE", "CH", "LU"]` in the manifest (Gladys 5.3.0 or later).
 
 [Unreleased]: https://github.com/LM1LC3N7/gladys-openagenda/commits/main

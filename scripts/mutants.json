@@ -62,7 +62,7 @@
   {
     "name": "app: only the first page",
     "file": "src/app.js",
-    "from": "if (!after || result.events.length === 0) return 'end';",
+    "from": "if (!after) return 'end';",
     "to": "return 'end';"
   },
   {
@@ -212,7 +212,7 @@
   {
     "name": "r1: sync-off calendar still pushed",
     "file": "src/app.js",
-    "from": "if (known && !known.sync) return 'skip';",
+    "from": "    if (known && !known.sync) {\n      this.due.delete(id);\n      return 'skip';\n    }",
     "to": ""
   },
   {
@@ -254,7 +254,7 @@
   {
     "name": "I1: cursor served again followed",
     "file": "src/app.js",
-    "from": "if (seen.has(key)) return 'end';",
+    "from": "if (seen.has(key)) throw new DataError('Page cursor served again');",
     "to": ""
   },
   {
@@ -290,7 +290,7 @@
   {
     "name": "M2: tags kept",
     "file": "src/openagenda.js",
-    "from": ".replace(/<[^<>]{0,2000}>/g, ' ')",
+    "from": ".replace(/<\\/?[a-z][a-z0-9-]{0,30}(?:\\s[^<>]{0,2000})?\\/?>/gi, ' ')",
     "to": ""
   },
   {
@@ -316,5 +316,29 @@
     "file": "src/app.js",
     "from": "if ((await readRange(from, now, { early: false, pages: PAST_PAGES })) === 'stopped') return;",
     "to": ""
+  },
+  {
+    "name": "R2-1: a calendar not taken forgotten after another push",
+    "file": "src/app.js",
+    "from": "    else if (result !== 'stopped') this.due.delete(id);",
+    "to": "    else if (result !== 'stopped') this.due.clear();"
+  },
+  {
+    "name": "R2-2: sent kept during a push",
+    "file": "src/app.js",
+    "from": "    this.sent.delete(id);\n    const result = await this.write(",
+    "to": "    const result = await this.write("
+  },
+  {
+    "name": "R2-4: any angle brackets removed",
+    "file": "src/openagenda.js",
+    "from": ".replace(/<\\/?[a-z][a-z0-9-]{0,30}(?:\\s[^<>]{0,2000})?\\/?>/gi, ' ')",
+    "to": ".replace(/<[^<>]{0,2000}>/g, ' ')"
+  },
+  {
+    "name": "R2-6: empty page with a cursor taken as the end",
+    "file": "src/app.js",
+    "from": "if (result.events.length === 0) throw new DataError('Empty page before the end');",
+    "to": "if (result.events.length === 0) return 'end';"
   }
 ]

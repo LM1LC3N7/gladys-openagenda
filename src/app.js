@@ -225,6 +225,9 @@ export class App {
     this.gladysError = false;
     this.pushFailures = 0;
     this.pushTimer = undefined;
+    /** calendar external_id -> user: the calendars Gladys did not take whole (pushed again). */
+    this.due = new Map();
+    this.dataBound = false;
     this.dataError = undefined;
     /** Monotonic times of the last calendar writes (the core's 30 a minute). */
     this.writes = [];
@@ -513,7 +516,6 @@ export class App {
    * read when they lack them. No request to OpenAgenda here.
    */
   async reconcile(gen, only) {
-    let failed = false;
     for (const account of this.accounts.values()) {
       if (gen !== this.generation) return;
       if (only !== undefined && account.user !== only) continue;
@@ -528,29 +530,38 @@ export class App {
           if (result === 'ok' || result === 'gone') {
             this.calendars.delete(id);
             this.sent.delete(id);
+            this.due.delete(id);
           } else if (result === 'failed') {
-            failed = true;
+            this.due.set(id, account.user);
           }
         }
       }
       for (const uid of uids) {
         if (gen !== this.generation) return;
-        if ((await this.pushCalendar(gen, account, this.sourceOf(account, uid))) === 'failed') {
-          failed = true;
-        }
+        await this.pushCalendar(gen, account, this.sourceOf(account, uid));
       }
     }
-    // A partial round (one user) says nothing of the others: only a failure counts then.
-    if (only === undefined || failed) this.afterPushes(gen, failed);
+    this.afterPushes(gen);
   }
 
   /** One user's calendar of one source: the calendar, then its events from the last read. */
   async pushCalendar(gen, account, src) {
     const id = this.calendarId(account.user, src.uid);
     const known = this.calendars.get(id);
-    if (known && !known.sync) return 'skip';
+    if (known && !known.sync) {
+      this.due.delete(id);
+      return 'skip';
+    }
     // Nothing read yet: the calendar comes with its first read (one write less a user).
     if (!src.cache) return 'skip';
+    const result = await this.pushCalendarNow(gen, account, src, id, known);
+    // Per calendar: a calendar not taken whole stays due until it goes through.
+    if (result === 'failed') this.due.set(id, account.user);
+    else if (result !== 'stopped') this.due.delete(id);
+    return result;
+  }
+
+  async pushCalendarNow(gen, account, src, id, known) {
     const agenda = this.agendas.get(src.uid);
     const title = agenda?.title || `OpenAgenda ${src.uid}`;
     const name = clean(account.city ? `${title} (${account.city})` : title, NAME_MAX);
@@ -574,10 +585,13 @@ export class App {
     // What the calendar holds, not when it was read: an unchanged read writes nothing.
     const sig = signature({ calendar, occurrences: cache.occurrences });
     if (this.sent.get(id) === sig) return 'ok';
+    // From the first write on, the calendar holds a mix until the last window
+    // went through: never "already sent" before that.
+    this.sent.delete(id);
     const result = await this.write(gen, () =>
       this.gladys.publishCalendars(account.user, [calendar]),
     );
-    if (result !== 'ok') return result === 'failed' ? 'failed' : 'skip';
+    if (result !== 'ok') return result === 'failed' || result === 'stopped' ? result : 'skip';
     if (!known) this.calendars.set(id, { user: account.user, sync: true });
     const { windows } = splitWindows(cache.occurrences);
     const idOf = (occ) => this.gladys.externalId(`${account.user}:a${src.uid}-${occ}`);
@@ -593,22 +607,25 @@ export class App {
         this.calendars.set(id, { user: account.user, sync: false });
         return 'skip';
       }
-      if (pushed !== 'ok') return pushed === 'failed' ? 'failed' : 'skip';
+      if (pushed !== 'ok') return pushed === 'failed' || pushed === 'stopped' ? pushed : 'skip';
     }
     this.sent.set(id, sig);
     return 'ok';
   }
 
   /**
-   * After a round of pushes: a calendar Gladys did not take is pushed again
-   * from the last read (no request to OpenAgenda) 5, 15, 30 min, then every
-   * hour; the first round without failure clears the status warning.
+   * After a round of pushes: while a calendar Gladys did not take is due, it
+   * is pushed again from the last read (no request to OpenAgenda) 5, 15,
+   * 30 min, then every hour; the warning goes once none is due. A round that
+   * did not touch a due calendar changes nothing of that.
    */
-  afterPushes(gen, failed) {
+  afterPushes(gen) {
     if (gen !== this.generation || !this.running) return;
-    if (this.pushTimer) this.timers.clearTimeout(this.pushTimer);
-    this.pushTimer = undefined;
-    if (!failed) {
+    // A due calendar of a user who left the integration is not due any more.
+    for (const [id, user] of this.due) if (!this.accounts.has(user)) this.due.delete(id);
+    if (this.due.size === 0) {
+      if (this.pushTimer) this.timers.clearTimeout(this.pushTimer);
+      this.pushTimer = undefined;
       this.pushFailures = 0;
       if (this.gladysError) {
         this.gladysError = false;
@@ -616,10 +633,13 @@ export class App {
       }
       return;
     }
-    this.gladysError = true;
+    if (!this.gladysError) {
+      this.gladysError = true;
+      this.publishStatus();
+    }
+    if (this.pushTimer) return;
     this.pushFailures += 1;
     const wait = RETRY_STEPS[Math.min(this.pushFailures, RETRY_STEPS.length) - 1];
-    this.publishStatus();
     this.pushTimer = this.timers.setTimeout(() => {
       this.pushTimer = undefined;
       this.enqueue(() => this.reconcile(gen));
@@ -831,6 +851,7 @@ export class App {
     // memory only (their calendars keep their events in Gladys; only a
     // republication after a restart waits for the next read).
     let size = Buffer.byteLength(JSON.stringify(state));
+    if (size <= MAX_SAVE_BYTES) this.dataBound = false;
     if (size > MAX_SAVE_BYTES) {
       const order = sources
         .map((entry, i) => ({ entry, key: [...this.sources.values()][i].key }))
@@ -845,7 +866,10 @@ export class App {
         size -= Buffer.byteLength(JSON.stringify(entry.cache));
         entry.cache = undefined;
       }
-      this.logger.warn('/data bound reached: the oldest reads are kept in memory only');
+      if (!this.dataBound) {
+        this.logger.warn('/data bound reached: the oldest reads are kept in memory only');
+      }
+      this.dataBound = true;
     }
     return state;
   }
@@ -1099,10 +1123,13 @@ export class App {
         }
         trim();
         after = result.after;
-        if (!after || result.events.length === 0) return 'end';
+        if (!after) return 'end';
+        // A cursor with an empty page, or a cursor served again: the list is
+        // cut short, never taken as its end (it would prune the rest).
+        if (result.events.length === 0) throw new DataError('Empty page before the end');
         // A cursor served twice would loop: the list ends there.
         const key = after.join('\u0000');
-        if (seen.has(key)) return 'end';
+        if (seen.has(key)) throw new DataError('Page cursor served again');
         seen.add(key);
         if (early && found.size >= max) {
           const last = [...found.values()].sort(byStart)[max - 1];
@@ -1158,16 +1185,15 @@ export class App {
     src.error = undefined;
     await this.save();
     this.publishStatus();
-    let failed = false;
     for (const account of this.accounts.values()) {
       if (gen !== this.generation) return;
       if (account.lang !== src.lang || account.city !== src.city) continue;
       if (!this.uidsOf(account).includes(src.uid)) continue;
-      if ((await this.pushCalendar(gen, account, src)) === 'failed') failed = true;
+      await this.pushCalendar(gen, account, src);
     }
-    // Every calendar of the other sources is pushed again too on a retry
-    // (those already holding their read are skipped by their signature).
-    if (failed || this.gladysError) this.afterPushes(gen, failed);
+    // A retry pushes every due calendar (those holding their read are
+    // skipped by their signature).
+    this.afterPushes(gen);
   }
 
   /** When every source with a read answers 401/403, the key is tested on the agendas list. */

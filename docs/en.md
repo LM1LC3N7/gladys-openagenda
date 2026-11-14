@@ -67,7 +67,8 @@ at a time, 2 s apart at least. After a failure: tried again 5 min, 15 min,
 30 min, 1 h later, then at the interval; an agenda not found (404) waits the
 interval at once. Texts are cleaned (HTML tags, entities, invisible and
 direction-changing characters removed). An event seen twice (pages that overlap)
-counts once. When the time-slot cap is reached before the last page, yesterday's
+counts once; an empty page announcing more, or the same next page served twice,
+is a read cut short (nothing sent, tried again as after a failure). When the time-slot cap is reached before the last page, yesterday's
 events are read on their own (the API lists them last). A restart, a reconnection, a new
 account following an agenda already read or a toggle start no read: the last
 read, kept in `/data`, is published again. Two users following the same agenda
@@ -116,7 +117,9 @@ never shown back), and a pause if any.
 - **Gladys** takes 30 calendar writes a minute: the integration makes 25 at most
   and, on a 429, waits a minute and writes again (3 times at most). A calendar
   Gladys did not take whole is sent again from the last read (no request to
-  OpenAgenda) 5, 15, 30 min later, then every hour, until it goes through. A read
+  OpenAgenda) 5, 15, 30 min later, then every hour, until it goes through, each
+  calendar on its own (another one going through does not clear it); the status
+  warning stays while one waits. A read
   that changes nothing writes nothing; a reconnection to Gladys sends everything
   once.
 - **`/data` unreadable**: nothing asked to OpenAgenda, read again every 10 s. The

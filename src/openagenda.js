@@ -61,7 +61,11 @@ export function clean(value, max) {
       // eslint-disable-next-line no-control-regex
       .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ')
       .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]+/g, '');
-  const text = strip(decodeEntities(value.slice(0, 20_000).replace(/<[^<>]{0,2000}>/g, ' ')))
+  const text = strip(
+    decodeEntities(
+      value.slice(0, 20_000).replace(/<\/?[a-z][a-z0-9-]{0,30}(?:\s[^<>]{0,2000})?\/?>/gi, ' '),
+    ),
+  )
     .replace(/\s+/g, ' ')
     .trim();
   if (text.length <= max) return text;

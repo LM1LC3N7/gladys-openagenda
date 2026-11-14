@@ -646,7 +646,7 @@ test('the cap keeps the soonest slots even when an event of the first page has m
 
 // --- Review r1 ---------------------------------------------------------------
 
-test('r1 I1: an event served twice (pages that overlap, a cursor served again) counts once', async (t) => {
+test('r1 I1: an event served twice (pages that overlap) counts once', async (t) => {
   const store = createMemoryStore();
   const env = await setup({ store, start: false });
   t.after(() => teardown(env));
@@ -657,7 +657,7 @@ test('r1 I1: an event served twice (pages that overlap, a cursor served again) c
     const after = r.u.searchParams.getAll('after[]');
     if (after.length === 0) return page([a], ['c1']);
     if (after[0] === 'c1') return page([a, b], ['c2']);
-    return page([b], ['c2']); // the same cursor again, for ever
+    return page([b], null);
   };
   await env.gladys.connect();
   await env.wait(30 * SECOND);
@@ -668,7 +668,6 @@ test('r1 I1: an event served twice (pages that overlap, a cursor served again) c
       .sort(),
     ['Concert 1002', 'Concert 1003'],
   );
-  assert.ok(env.source.count('events') <= 4, 'a cursor served again ends the list');
   const ids = store.data.sources[0].cache.packed.occ.map((o) => o[1]);
   assert.equal(new Set(ids).size, ids.length);
 });
@@ -934,4 +933,84 @@ test('r1 M6: the cap reached early, yesterday is still read', async (t) => {
   await env.wait(20 * SECOND);
   assert.ok(env.events().some((e) => e.name === 'Hier'));
   assert.equal(env.events().length, 50);
+});
+
+test('r2: an empty page with a cursor, or a cursor served again, is a read cut short', async (t) => {
+  for (const second of [
+    () => page([], ['c9']),
+    () => page([event({ uid: 5, timings: [[NOW + DAY, NOW + DAY + HOUR]] })], ['c1']),
+  ]) {
+    const env = await start(t);
+    env.source.events = (r) =>
+      r.u.searchParams.has('after[]')
+        ? second()
+        : page([event({ uid: 6, timings: [[NOW + DAY, NOW + DAY + HOUR]] })], ['c1']);
+    await env.wait(6 * HOUR + MINUTE);
+    assert.equal(env.events().length, 4, 'nothing pushed nor pruned');
+    assert.match(statusText(env), /1 in error \(unreadable answer\)/);
+    assert.ok(env.source.count('events') <= 4);
+    await teardown(env);
+  }
+});
+
+test('r2: two agendas, the first not taken by Gladys: it stays due, the warning stays, it is sent again', async (t) => {
+  const env = await setup({ accounts: [account('alice', 'testville, 777')], start: false });
+  t.after(() => teardown(env));
+  env.source.agendaList.push({ uid: 777, slug: 'autre', title: 'Autre' });
+  const original = env.gladys.publishCalendarEvents.bind(env.gladys);
+  let fail = 1;
+  env.gladys.publishCalendarEvents = async (...args) => {
+    if (fail > 0 && args[0] === env.calId()) {
+      fail -= 1;
+      throw Object.assign(new Error('boom'), { name: 'GladysApiError', status: 500 });
+    }
+    return original(...args);
+  };
+  await env.gladys.connect();
+  await env.wait(20 * SECOND);
+  assert.equal(env.source.count('events'), 2, 'both agendas read');
+  const first = env.gladys.fake.calendarEvents.filter(
+    (e) => e.calendar_external_id === env.calId(),
+  );
+  assert.equal(first.length, 0);
+  assert.match(statusText(env), /Gladys refused or did not take/);
+  await env.wait(5 * MINUTE + SECOND);
+  assert.equal(
+    env.gladys.fake.calendarEvents.filter((e) => e.calendar_external_id === env.calId()).length,
+    4,
+  );
+  assert.doesNotMatch(statusText(env), /Gladys refused/);
+  assert.equal(env.source.count('events'), 2);
+});
+
+test('r2: back to the read before a half-failed push: written again, never taken as sent', async (t) => {
+  const env = await setup({ config: { api_key: KEY, max_events: 2000 } });
+  t.after(() => teardown(env));
+  const day = Math.floor(NOW / DAY) * DAY;
+  const original = env.gladys.publishCalendarEvents.bind(env.gladys);
+  env.gladys.publishCalendarEvents = async (...args) => {
+    // The first window goes through, the second fails: Gladys holds a mix.
+    if (args[2]?.from !== '2000-01-01T00:00:00.000Z') {
+      throw Object.assign(new Error('boom'), { name: 'GladysApiError', status: 500 });
+    }
+    return original(...args);
+  };
+  const old = env.source.eventList;
+  env.source.eventList = Array.from({ length: 600 }, (_, k) =>
+    event({
+      uid: 3000 + k,
+      title: 'B',
+      timings: [[day + DAY + k * HOUR, day + DAY + k * HOUR + HOUR]],
+    }),
+  );
+  await env.wait(6 * HOUR + MINUTE);
+  assert.ok(
+    env.events().some((e) => e.name === 'B'),
+    'a mix',
+  );
+  // The agenda comes back to its first read (one window: it goes through).
+  env.source.eventList = old;
+  await env.wait(6 * HOUR);
+  assert.equal(env.events().length, 4, 'exactly the read again');
+  assert.ok(env.events().every((e) => e.name !== 'B'));
 });

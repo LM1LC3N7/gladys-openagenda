@@ -68,7 +68,9 @@ une requête à la fois, 2 s au moins entre deux. Après un échec : nouvel essa
 5 min, 15 min, 30 min, 1 h plus tard, puis à l’intervalle ; un agenda introuvable
 (404) attend directement l’intervalle. Les textes sont nettoyés (balises HTML,
 entités, caractères invisibles ou d’inversion d’écriture retirés). Un événement
-vu deux fois (pages qui se recouvrent) ne compte qu’une fois. Quand le plafond de
+vu deux fois (pages qui se recouvrent) ne compte qu’une fois ; une page vide qui
+annonce une suite, ou une suite servie deux fois, est une lecture coupée (rien
+n’est envoyé, nouvel essai comme après un échec). Quand le plafond de
 créneaux est atteint avant la fin des pages, les événements de la veille sont lus
 à part (l’API les range en dernier). Un redémarrage, une
 reconnexion, un nouveau compte qui suit un agenda déjà lu ou un interrupteur ne
@@ -122,7 +124,8 @@ saisi n’est jamais réaffiché), et une pause éventuelle.
   25 au plus et, sur un refus 429, attend une minute puis réécrit (3 fois au plus).
   Un calendrier que Gladys n’a pas pris en entier est renvoyé depuis la dernière
   lecture (sans demande à OpenAgenda) 5, 15, 30 min puis toutes les heures, jusqu’à
-  ce qu’il passe. Une lecture qui ne change rien n’écrit rien ; une reconnexion à
+  ce qu’il passe, chaque calendrier pour lui-même (un autre qui passe ne l’efface
+  pas) ; l’avertissement du statut reste tant qu’un calendrier attend. Une lecture qui ne change rien n’écrit rien ; une reconnexion à
   Gladys renvoie tout une fois.
 - **`/data` illisible** : rien n’est demandé à OpenAgenda, relecture toutes les
   10 s. Le fichier est écrit sous 16 Mo (relu jusqu’à 32 Mo) : au-delà, les

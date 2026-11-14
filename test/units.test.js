@@ -369,3 +369,8 @@ test('r1: a timing given twice in one event is one occurrence', () => {
   );
   assert.equal(r.occurrences.length, 1);
 });
+
+test('r2: only real tags are removed, comparisons kept', () => {
+  assert.equal(clean('Tarif < 12 ans et > 6 ans', 100), 'Tarif < 12 ans et > 6 ans');
+  assert.equal(clean('a<br/>b <p class="x">c</p> 3<4>2', 100), 'a b c 3<4>2');
+});

@@ -117,8 +117,8 @@ export const T = {
       if (s.gladysError) {
         parts.push(
           l === 'en'
-            ? 'Gladys refused or did not take some calendar writes (retried at the next read)'
-            : 'Gladys a refusé ou pas pris des écritures de calendrier (réessayées à la prochaine lecture)',
+            ? 'Gladys refused or did not take some calendar writes (sent again 5, 15, 30 min, then every hour)'
+            : 'Gladys a refusé ou pas pris des écritures de calendrier (renvoyées 5, 15, 30 min, puis toutes les heures)',
         );
       }
       if (s.dataError) parts.push(reason('data', l));
