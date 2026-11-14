@@ -1,6 +1,6 @@
 {
   "name": "gladys-openagenda",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "OpenAgenda cultural agendas (concerts, exhibitions) as Gladys Assistant calendars, through the official API v2 (unofficial).",
   "type": "module",

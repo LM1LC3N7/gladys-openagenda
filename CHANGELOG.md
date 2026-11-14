@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-14
+
 ### Added
 
 - OpenAgenda agendas as Gladys calendars (`type: calendar`): each user enables
@@ -52,4 +54,5 @@ the notes of the version's GitHub Release.
   user leaving while a calendar is due and a failed calendar delete.
 - `countries: ["FR", "BE", "CH", "LU"]` in the manifest (Gladys 5.3.0 or later).
 
-[Unreleased]: https://github.com/LM1LC3N7/gladys-openagenda/commits/main
+[Unreleased]: https://github.com/LM1LC3N7/gladys-openagenda/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-openagenda/releases/tag/v0.1.1
