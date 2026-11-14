@@ -60,5 +60,13 @@
   10 min doubled up to 6 h), kept in /data; the sources it held are read as
   soon as it ends, without counting a failure.
 - /data not writable: no read (the attempt must be in /data before the read).
+- Review r1: the calendar signature leaves out the read date (the calendar
+  description no longer carries it, the status does), so an unchanged read
+  writes nothing; `sent` is cleared at each connection (a sync toggle while
+  disconnected is lost by the core's events), so a reconnection rewrites
+  everything once (M5, accepted).
+- Review r1 (M6): `timings.asc` lists the next timing to come first and the past
+  last: after an early cut, [yesterday, now] is read on its own (5 pages at
+  most).
 - `.github/workflows/ci.yml`: `timeout-minutes: 30` on both jobs (taken from
   the other modules), so the first release tag must be pushed by hand.

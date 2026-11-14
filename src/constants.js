@@ -45,6 +45,8 @@ export const DAY = 24 * HOUR;
 /** Events per page (the API takes 300 at most) and pages per agenda read. */
 export const PAGE_SIZE = 100;
 export const MAX_PAGES = 25;
+/** Pages read for the past part (yesterday) when the upcoming one was cut early. */
+export const PAST_PAGES = 5;
 /** One answer of the API: bounded in size and in time. */
 export const MAX_ANSWER_BYTES = 6 * 1024 * 1024;
 export const HTTP_TIMEOUT = 20 * SECOND;
@@ -85,7 +87,9 @@ export const PAST = DAY;
 export const MAX_TIMING = 48 * HOUR;
 
 /** /data: one JSON file, bounded. */
-export const MAX_STATE_BYTES = 24 * 1024 * 1024;
+export const MAX_STATE_BYTES = 32 * 1024 * 1024;
+/** What is written stays well under what is read back. */
+export const MAX_SAVE_BYTES = 16 * 1024 * 1024;
 export const STORE_RETRY = 10 * SECOND;
 export const LOAD_TIMEOUT = 10 * SECOND;
 export const SAVE_TIMEOUT = 10 * SECOND;

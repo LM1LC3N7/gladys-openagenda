@@ -62,8 +62,8 @@
   {
     "name": "app: only the first page",
     "file": "src/app.js",
-    "from": "if (!after || result.events.length === 0) break;",
-    "to": "break;"
+    "from": "if (!after || result.events.length === 0) return 'end';",
+    "to": "return 'end';"
   },
   {
     "name": "app: read without the attempt in /data",
@@ -132,16 +132,16 @@
     "to": "if (true) {"
   },
   {
-    "name": "app: cap not applied",
+    "name": "app: cap not applied while reading",
     "file": "src/app.js",
-    "from": "      occurrences.length = max;\n",
-    "to": "\n"
+    "from": "const kept = [...found.values()].sort(byStart).slice(0, max);",
+    "to": "const kept = [...found.values()].sort(byStart);"
   },
   {
     "name": "app: failure back-off ignored",
     "file": "src/app.js",
-    "from": "return Math.min(RETRY_STEPS[Math.min(src.failures, RETRY_STEPS.length) - 1], interval);",
-    "to": "return 0;"
+    "from": "if (src.failures > 0) return Math.min(RETRY_STEPS[src.failures - 1], interval);",
+    "to": "if (src.failures > 0) return 0;"
   },
   {
     "name": "app: /data read without bound",
@@ -170,8 +170,8 @@
   {
     "name": "app: cap stops at the first full page",
     "file": "src/app.js",
-    "from": "if (occurrences[max - 1].start <= pageFirst) {",
-    "to": "if (true) {"
+    "from": "if (last.start <= pageFirst) return 'cut';",
+    "to": "return 'cut';"
   },
   {
     "name": "app: sources forgotten at once",
@@ -183,6 +183,138 @@
     "name": "app: calendars Gladys lost not sent again",
     "file": "src/app.js",
     "from": "for (const id of [...this.sent.keys()]) if (!this.calendars.has(id)) this.sent.delete(id);",
+    "to": ""
+  },
+  {
+    "name": "r1: PAST 0 (yesterday dropped)",
+    "file": "src/constants.js",
+    "from": "export const PAST = DAY;",
+    "to": "export const PAST = 0;"
+  },
+  {
+    "name": "r1: min gap 2s -> 0",
+    "file": "src/constants.js",
+    "from": "export const MIN_GAP = 2 * SECOND;",
+    "to": "export const MIN_GAP = 0;"
+  },
+  {
+    "name": "r1: updatedAt not asked",
+    "file": "src/constants.js",
+    "from": "  'updatedAt',\n",
+    "to": ""
+  },
+  {
+    "name": "r1: sent cache kept across connections",
+    "file": "src/app.js",
+    "from": "    this.sent.clear();\n    await this.loading",
+    "to": "    await this.loading"
+  },
+  {
+    "name": "r1: sync-off calendar still pushed",
+    "file": "src/app.js",
+    "from": "if (known && !known.sync) return 'skip';",
+    "to": ""
+  },
+  {
+    "name": "r1: city not in source key",
+    "file": "src/app.js",
+    "from": "const sourceKey = (uid, lang, city) => `${uid}|${lang}|${city ?? ''}`;",
+    "to": "const sourceKey = (uid, lang) => `${uid}|${lang}|`;"
+  },
+  {
+    "name": "r1: 800 timings bound removed",
+    "file": "src/openagenda.js",
+    "from": "timings.slice(0, 800)",
+    "to": "timings"
+  },
+  {
+    "name": "r1: timing dedupe removed",
+    "file": "src/openagenda.js",
+    "from": "    if (seen.has(id)) continue;\n",
+    "to": ""
+  },
+  {
+    "name": "r1: Gladys 403 not handled (sync off)",
+    "file": "src/app.js",
+    "from": "if (status === 403) return 'off';",
+    "to": ""
+  },
+  {
+    "name": "r1: unstated licence flag lost",
+    "file": "src/app.js",
+    "from": "unstated: licences.has(''),",
+    "to": "unstated: false,"
+  },
+  {
+    "name": "I1: ids not kept once when restored",
+    "file": "src/app.js",
+    "from": "    if (seen.has(o[1])) continue;\n",
+    "to": ""
+  },
+  {
+    "name": "I1: cursor served again followed",
+    "file": "src/app.js",
+    "from": "if (seen.has(key)) return 'end';",
+    "to": ""
+  },
+  {
+    "name": "I2: failed pushes not retried",
+    "file": "src/app.js",
+    "from": "      this.enqueue(() => this.reconcile(gen));\n    }, wait);",
+    "to": "    }, wait);"
+  },
+  {
+    "name": "I3: write bound removed",
+    "file": "src/app.js",
+    "from": "if (size > MAX_SAVE_BYTES) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "I3: texts repeated per occurrence",
+    "file": "src/app.js",
+    "from": "    let i = index.get(key);",
+    "to": "    let i;"
+  },
+  {
+    "name": "I4: gone agenda retried hourly",
+    "file": "src/app.js",
+    "from": "if (src.error === 'not_found' || src.failures > RETRY_STEPS.length) return interval;",
+    "to": ""
+  },
+  {
+    "name": "M1: bad city still read",
+    "file": "src/app.js",
+    "from": "    if (account.problem === 'bad_city') return out;\n",
+    "to": ""
+  },
+  {
+    "name": "M2: tags kept",
+    "file": "src/openagenda.js",
+    "from": ".replace(/<[^<>]{0,2000}>/g, ' ')",
+    "to": ""
+  },
+  {
+    "name": "M2: bidi kept",
+    "file": "src/openagenda.js",
+    "from": ".replace(/[\\u200b-\\u200f\\u202a-\\u202e\\u2060-\\u2069\\ufeff]+/g, '')",
+    "to": ""
+  },
+  {
+    "name": "M3: Retry-After in a row not grown",
+    "file": "src/app.js",
+    "from": "if (this.pause && err.retryAfter !== undefined) wanted = Math.max(wanted, growing);",
+    "to": ""
+  },
+  {
+    "name": "M5: unchanged read written again",
+    "file": "src/app.js",
+    "from": "if (this.sent.get(id) === sig) return 'ok';",
+    "to": ""
+  },
+  {
+    "name": "M6: past not read after an early cut",
+    "file": "src/app.js",
+    "from": "if ((await readRange(from, now, { early: false, pages: PAST_PAGES })) === 'stopped') return;",
     "to": ""
   }
 ]

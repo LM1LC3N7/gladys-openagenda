@@ -34,6 +34,14 @@ the notes of the version's GitHub Release.
   bounded, kept in /data).
 - At most 25 calendar writes a minute (the core takes 30), a Gladys 429 waited
   out; more than 500 events cut into disjoint sub-windows.
+- Review r1: an event seen twice counts once (a cursor served again ends the
+  list); a calendar Gladys did not take whole is sent again from the last read
+  (5, 15, 30 min, then hourly); /data written under 16 MB with each event's texts
+  once (read up to 32 MB); an agenda not found waits the interval, other
+  failures 5, 15, 30 min, 1 h, then the interval; an unreadable city reads
+  nothing; HTML tags, entities and bidi characters cleaned; 429 in a row
+  lengthen the pause; a read that changes nothing writes nothing; yesterday's
+  events read on their own when the cap stops the pages early.
 - `countries: ["FR", "BE", "CH", "LU"]` in the manifest (Gladys 5.3.0 or later).
 
 [Unreleased]: https://github.com/LM1LC3N7/gladys-openagenda/commits/main

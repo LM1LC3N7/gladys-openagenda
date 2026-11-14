@@ -42,7 +42,9 @@ active l’intégration pour lui-même (c’est son accord) et indique :
   (`https://openagenda.com/agenda-de-ma-ville`), son nom court (la fin du lien)
   ou son numéro (`https://openagenda.com/agendas/12345678`).
 - **Ville** (facultatif) : seulement les événements de cette ville, écrite comme
-  OpenAgenda l’écrit (champ « commune » des lieux).
+  OpenAgenda l’écrit (champ « commune » des lieux). Une ville illisible (signes
+  autres que lettres, nombres, espace, apostrophe, point, tiret, parenthèses) :
+  rien n’est lu ni changé pour ce compte tant qu’elle n’est pas corrigée.
 
 Chaque agenda devient un calendrier **privé** de cet utilisateur. Pour qu’il soit
 vu de tout le foyer et puisse déclencher des scènes, partagez-le (interrupteur
@@ -63,7 +65,12 @@ répondu pour chaque entrée de la liste).
 
 Rythme : un agenda est lu une fois par intervalle, toutes ses pages d’affilée,
 une requête à la fois, 2 s au moins entre deux. Après un échec : nouvel essai
-5 min, 15 min, 30 min, 1 h plus tard, puis à l’intervalle. Un redémarrage, une
+5 min, 15 min, 30 min, 1 h plus tard, puis à l’intervalle ; un agenda introuvable
+(404) attend directement l’intervalle. Les textes sont nettoyés (balises HTML,
+entités, caractères invisibles ou d’inversion d’écriture retirés). Un événement
+vu deux fois (pages qui se recouvrent) ne compte qu’une fois. Quand le plafond de
+créneaux est atteint avant la fin des pages, les événements de la veille sont lus
+à part (l’API les range en dernier). Un redémarrage, une
 reconnexion, un nouveau compte qui suit un agenda déjà lu ou un interrupteur ne
 relancent pas de lecture : la dernière lecture, gardée dans `/data`, est
 republiée. Deux utilisateurs qui suivent le même agenda dans la même langue et
@@ -106,12 +113,19 @@ saisi n’est jamais réaffiché), et une pause éventuelle.
   nouvelle clé ou un clic réussi sur **Tester la clé**. Un 403 sur un seul agenda
   n’est pas un refus de la clé.
 - **429 ou 5xx** : toutes les demandes s’arrêtent le temps indiqué par
-  `Retry-After` (1 min à 6 h), sinon 10 min, puis 20, 40… jusqu’à 6 h ; la pause
-  est gardée dans `/data`.
+  `Retry-After` (1 min à 6 h), sinon 10 min, puis 20, 40… jusqu’à 6 h ; des refus
+  à la suite allongent la pause même avec un `Retry-After` court ; elle est gardée
+  dans `/data`.
 - **Lecture interrompue** (réseau, réponse illisible ou de plus de 6 Mo) : rien
   n’est envoyé à Gladys, le calendrier garde la lecture précédente.
 - **Gladys** accepte 30 écritures de calendrier par minute : l’intégration en fait
   25 au plus et, sur un refus 429, attend une minute puis réécrit (3 fois au plus).
+  Un calendrier que Gladys n’a pas pris en entier est renvoyé depuis la dernière
+  lecture (sans demande à OpenAgenda) 5, 15, 30 min puis toutes les heures, jusqu’à
+  ce qu’il passe. Une lecture qui ne change rien n’écrit rien ; une reconnexion à
+  Gladys renvoie tout une fois.
 - **`/data` illisible** : rien n’est demandé à OpenAgenda, relecture toutes les
-  10 s. **`/data` non inscriptible** : aucune lecture (un redémarrage ne saurait
+  10 s. Le fichier est écrit sous 16 Mo (relu jusqu’à 32 Mo) : au-delà, les
+  lectures les plus anciennes restent en mémoire seulement (leurs calendriers
+  gardent leurs événements). **`/data` non inscriptible** : aucune lecture (un redémarrage ne saurait
   pas qu’elle a eu lieu).

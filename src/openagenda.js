@@ -37,12 +37,31 @@ export class DataError extends Error {
 const isObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const own = (o, k) => (isObject(o) && Object.hasOwn(o, k) ? o[k] : undefined);
 
-/** Text without control characters, spaces collapsed, cut to `max` characters (an ellipsis when cut). */
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ' };
+
+/** A few HTML entities decoded (named ones above, decimal and hex ones); others left. */
+function decodeEntities(text) {
+  return text.replace(/&(#x[0-9a-f]{1,6}|#\d{1,7}|[a-z]{2,6});/gi, (all, code) => {
+    if (code[0] !== '#') return ENTITIES[code.toLowerCase()] ?? all;
+    const n =
+      code[1] === 'x' || code[1] === 'X' ? parseInt(code.slice(2), 16) : Number(code.slice(1));
+    return Number.isInteger(n) && n > 0 && n <= 0x10ffff ? String.fromCodePoint(n) : all;
+  });
+}
+
+/**
+ * Text as Gladys shows it: HTML tags out, a few entities decoded, control,
+ * zero-width and bidi characters (an U+202E turns a title around) out,
+ * spaces collapsed, cut to `max` characters (an ellipsis when cut).
+ */
 export function clean(value, max) {
   if (typeof value !== 'string') return '';
-  const text = value
-    // eslint-disable-next-line no-control-regex
-    .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ')
+  const strip = (t) =>
+    t
+      // eslint-disable-next-line no-control-regex
+      .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]+/g, ' ')
+      .replace(/[\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]+/g, '');
+  const text = strip(decodeEntities(value.slice(0, 20_000).replace(/<[^<>]{0,2000}>/g, ' ')))
     .replace(/\s+/g, ' ')
     .trim();
   if (text.length <= max) return text;

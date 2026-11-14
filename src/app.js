@@ -43,6 +43,8 @@ import {
   LOAD_TIMEOUT,
   MAX_ANSWER_BYTES,
   MAX_PAGES,
+  PAST_PAGES,
+  MAX_SAVE_BYTES,
   MAX_SLEEP,
   MIN_GAP,
   MINUTE,
@@ -82,44 +84,92 @@ const pastDate = (value, now) =>
     ? value
     : undefined;
 
+const byStart = (a, b) => a.start - b.start || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 const sourceKey = (uid, lang, city) => `${uid}|${lang}|${city ?? ''}`;
 const signature = (value) =>
   createHash('sha256').update(JSON.stringify(value)).digest('hex').slice(0, 16);
 
-/** Occurrences read back from /data: each field checked, bounded; undefined when one does not read. */
-function restoreOccurrences(list) {
-  if (!Array.isArray(list) || list.length > 2000) return undefined;
-  const out = [];
+/**
+ * The occurrences as kept in /data: the texts of an event once (`texts`:
+ * [name, description, location, url]), each occurrence as [text index, id,
+ * start, end]. A recurring event costs its texts once, not per date.
+ */
+export function packOccurrences(list) {
+  const texts = [];
+  const index = new Map();
+  const occ = [];
   for (const o of list) {
+    const t = [o.name, o.description, o.location ?? null, o.url ?? null];
+    const key = JSON.stringify(t);
+    let i = index.get(key);
+    if (i === undefined) {
+      i = texts.length;
+      texts.push(t);
+      index.set(key, i);
+    }
+    occ.push([i, o.id, o.start, o.end]);
+  }
+  return { texts, occ };
+}
+
+const optional = (v, max, pattern) =>
+  v === null || (typeof v === 'string' && v.length <= max && (!pattern || pattern.test(v)));
+
+/**
+ * Occurrences read back from /data: each field checked, bounded, an id kept
+ * once; undefined when one does not read.
+ */
+export function restoreOccurrences(packed) {
+  const texts = packed?.texts;
+  const occ = packed?.occ;
+  if (!Array.isArray(texts) || !Array.isArray(occ) || occ.length > 2000 || texts.length > 2000) {
+    return undefined;
+  }
+  for (const t of texts) {
     if (
-      !o ||
-      typeof o.id !== 'string' ||
-      !/^\d{1,15}-\d{1,12}$/.test(o.id) ||
-      !Number.isFinite(o.start) ||
-      !Number.isFinite(o.end) ||
-      o.end < o.start ||
-      typeof o.name !== 'string' ||
-      !o.name ||
-      o.name.length > 200 ||
-      typeof o.description !== 'string' ||
-      o.description.length > 1000 ||
-      (o.location !== undefined && (typeof o.location !== 'string' || o.location.length > 500)) ||
-      (o.url !== undefined &&
-        (typeof o.url !== 'string' || !/^https?:\/\//.test(o.url) || o.url.length > 500))
+      !Array.isArray(t) ||
+      t.length !== 4 ||
+      typeof t[0] !== 'string' ||
+      !t[0] ||
+      t[0].length > 200 ||
+      typeof t[1] !== 'string' ||
+      t[1].length > 1000 ||
+      !optional(t[2], 500) ||
+      !optional(t[3], 500, /^https?:\/\//)
     ) {
       return undefined;
     }
+  }
+  const out = [];
+  const seen = new Set();
+  for (const o of occ) {
+    if (
+      !Array.isArray(o) ||
+      !Number.isInteger(o[0]) ||
+      o[0] < 0 ||
+      o[0] >= texts.length ||
+      typeof o[1] !== 'string' ||
+      !/^\d{1,15}-\d{1,12}$/.test(o[1]) ||
+      !Number.isFinite(o[2]) ||
+      !Number.isFinite(o[3]) ||
+      o[3] < o[2]
+    ) {
+      return undefined;
+    }
+    if (seen.has(o[1])) continue;
+    seen.add(o[1]);
+    const [name, description, location, url] = texts[o[0]];
     out.push({
-      id: o.id,
-      start: o.start,
-      end: o.end,
-      name: o.name,
-      description: o.description,
-      location: o.location,
-      url: o.url,
+      id: o[1],
+      start: o[2],
+      end: o[3],
+      name,
+      description,
+      location: location ?? undefined,
+      url: url ?? undefined,
     });
   }
-  return out;
+  return out.sort(byStart);
 }
 
 const names = (list) =>
@@ -173,6 +223,8 @@ export class App {
     this.requestMono = undefined;
     this.testMono = undefined;
     this.gladysError = false;
+    this.pushFailures = 0;
+    this.pushTimer = undefined;
     this.dataError = undefined;
     /** Monotonic times of the last calendar writes (the core's 30 a minute). */
     this.writes = [];
@@ -230,7 +282,7 @@ export class App {
   }
 
   clearTimers() {
-    for (const name of ['timer', 'storeTimer', 'configTimer', 'accountsTimer']) {
+    for (const name of ['timer', 'storeTimer', 'configTimer', 'accountsTimer', 'pushTimer']) {
       if (this[name]) this.timers.clearTimeout(this[name]);
       this[name] = undefined;
     }
@@ -426,6 +478,7 @@ export class App {
   /** The agenda uids an account follows, as far as they are known (slugs resolved). */
   uidsOf(account) {
     const out = [];
+    if (account.problem === 'bad_city') return out;
     for (const ref of account.refs) {
       const uid = ref.uid ?? this.slugs.get(ref.slug)?.uid;
       if (uid && !out.includes(uid)) out.push(uid);
@@ -460,9 +513,12 @@ export class App {
    * read when they lack them. No request to OpenAgenda here.
    */
   async reconcile(gen, only) {
+    let failed = false;
     for (const account of this.accounts.values()) {
       if (gen !== this.generation) return;
       if (only !== undefined && account.user !== only) continue;
+      // An unreadable city: nothing read, pushed nor deleted for this account.
+      if (account.problem === 'bad_city') continue;
       const uids = this.uidsOf(account);
       const wanted = new Set(uids.map((uid) => this.calendarId(account.user, uid)));
       if (this.resolved(account)) {
@@ -472,23 +528,29 @@ export class App {
           if (result === 'ok' || result === 'gone') {
             this.calendars.delete(id);
             this.sent.delete(id);
+          } else if (result === 'failed') {
+            failed = true;
           }
         }
       }
       for (const uid of uids) {
         if (gen !== this.generation) return;
-        await this.pushCalendar(gen, account, this.sourceOf(account, uid));
+        if ((await this.pushCalendar(gen, account, this.sourceOf(account, uid))) === 'failed') {
+          failed = true;
+        }
       }
     }
+    // A partial round (one user) says nothing of the others: only a failure counts then.
+    if (only === undefined || failed) this.afterPushes(gen, failed);
   }
 
   /** One user's calendar of one source: the calendar, then its events from the last read. */
   async pushCalendar(gen, account, src) {
     const id = this.calendarId(account.user, src.uid);
     const known = this.calendars.get(id);
-    if (known && !known.sync) return;
+    if (known && !known.sync) return 'skip';
     // Nothing read yet: the calendar comes with its first read (one write less a user).
-    if (!src.cache) return;
+    if (!src.cache) return 'skip';
     const agenda = this.agendas.get(src.uid);
     const title = agenda?.title || `OpenAgenda ${src.uid}`;
     const name = clean(account.city ? `${title} (${account.city})` : title, NAME_MAX);
@@ -501,7 +563,6 @@ export class App {
           licences: cache?.licences,
           unstated: cache?.unstated,
           licensors: cache?.licensors,
-          readAt: cache?.at,
           truncated: cache?.truncated,
           max: this.config?.maxEvents,
         },
@@ -510,12 +571,13 @@ export class App {
       CAL_DESCRIPTION_MAX,
     );
     const calendar = { external_id: id, name, description };
-    const sig = signature({ calendar, at: cache?.at, n: cache?.occurrences.length });
-    if (this.sent.get(id) === sig) return;
+    // What the calendar holds, not when it was read: an unchanged read writes nothing.
+    const sig = signature({ calendar, occurrences: cache.occurrences });
+    if (this.sent.get(id) === sig) return 'ok';
     const result = await this.write(gen, () =>
       this.gladys.publishCalendars(account.user, [calendar]),
     );
-    if (result !== 'ok') return;
+    if (result !== 'ok') return result === 'failed' ? 'failed' : 'skip';
     if (!known) this.calendars.set(id, { user: account.user, sync: true });
     const { windows } = splitWindows(cache.occurrences);
     const idOf = (occ) => this.gladys.externalId(`${account.user}:a${src.uid}-${occ}`);
@@ -529,11 +591,39 @@ export class App {
       );
       if (pushed === 'off') {
         this.calendars.set(id, { user: account.user, sync: false });
-        return;
+        return 'skip';
       }
-      if (pushed !== 'ok') return;
+      if (pushed !== 'ok') return pushed === 'failed' ? 'failed' : 'skip';
     }
     this.sent.set(id, sig);
+    return 'ok';
+  }
+
+  /**
+   * After a round of pushes: a calendar Gladys did not take is pushed again
+   * from the last read (no request to OpenAgenda) 5, 15, 30 min, then every
+   * hour; the first round without failure clears the status warning.
+   */
+  afterPushes(gen, failed) {
+    if (gen !== this.generation || !this.running) return;
+    if (this.pushTimer) this.timers.clearTimeout(this.pushTimer);
+    this.pushTimer = undefined;
+    if (!failed) {
+      this.pushFailures = 0;
+      if (this.gladysError) {
+        this.gladysError = false;
+        this.publishStatus();
+      }
+      return;
+    }
+    this.gladysError = true;
+    this.pushFailures += 1;
+    const wait = RETRY_STEPS[Math.min(this.pushFailures, RETRY_STEPS.length) - 1];
+    this.publishStatus();
+    this.pushTimer = this.timers.setTimeout(() => {
+      this.pushTimer = undefined;
+      this.enqueue(() => this.reconcile(gen));
+    }, wait);
   }
 
   /**
@@ -557,14 +647,11 @@ export class App {
         }
         if (status === 403) return 'off';
         if (status === 404) return 'gone';
-        this.gladysError = true;
         this.logger.warn(`Calendar write refused (${err?.name ?? 'Error'} ${status ?? ''})`.trim());
         this.publishStatus();
         return 'failed';
       }
     }
-    this.gladysError = true;
-    this.publishStatus();
     return 'failed';
   }
 
@@ -687,7 +774,7 @@ export class App {
         src.failures = s.failures;
       src.error = REASON_CODES.includes(s.error) ? s.error : undefined;
       const c = s.cache;
-      const occurrences = c ? restoreOccurrences(c.occurrences) : undefined;
+      const occurrences = c ? restoreOccurrences(c.packed) : undefined;
       const at = c ? pastDate(c.at, now) : undefined;
       if (occurrences && at !== undefined) {
         src.cache = {
@@ -710,24 +797,57 @@ export class App {
     for (const [uid, a] of this.agendas) agendas[uid] = a;
     const slugs = {};
     for (const [slug, s] of this.slugs) slugs[slug] = s;
-    return {
-      version: 1,
+    const followed = new Set(this.followed().map((src) => src.key));
+    const sources = [...this.sources.values()].map((s) => ({
+      uid: s.uid,
+      lang: s.lang,
+      city: s.city,
+      attemptAt: s.attemptAt,
+      failures: s.failures,
+      error: s.error,
+      cache: s.cache
+        ? {
+            at: s.cache.at,
+            licences: s.cache.licences,
+            licensors: s.cache.licensors,
+            unstated: s.cache.unstated,
+            truncated: s.cache.truncated,
+            packed: packOccurrences(s.cache.occurrences),
+          }
+        : undefined,
+    }));
+    const state = {
+      version: 2,
       refused: this.refused,
       pause: this.pause
         ? { until: this.pause.until, code: this.pause.code, step: this.pause.step }
         : undefined,
       agendas,
       slugs,
-      sources: [...this.sources.values()].map((s) => ({
-        uid: s.uid,
-        lang: s.lang,
-        city: s.city,
-        attemptAt: s.attemptAt,
-        failures: s.failures,
-        error: s.error,
-        cache: s.cache,
-      })),
+      sources,
     };
+    // Written well under what is read back (MAX_STATE_BYTES): past the bound,
+    // the last reads of the agendas nobody follows, then the oldest, stay in
+    // memory only (their calendars keep their events in Gladys; only a
+    // republication after a restart waits for the next read).
+    let size = Buffer.byteLength(JSON.stringify(state));
+    if (size > MAX_SAVE_BYTES) {
+      const order = sources
+        .map((entry, i) => ({ entry, key: [...this.sources.values()][i].key }))
+        .filter((x) => x.entry.cache)
+        .sort(
+          (a, b) =>
+            Number(followed.has(a.key)) - Number(followed.has(b.key)) ||
+            a.entry.cache.at - b.entry.cache.at,
+        );
+      for (const { entry } of order) {
+        if (size <= MAX_SAVE_BYTES) break;
+        size -= Buffer.byteLength(JSON.stringify(entry.cache));
+        entry.cache = undefined;
+      }
+      this.logger.warn('/data bound reached: the oldest reads are kept in memory only');
+    }
+    return state;
   }
 
   /**
@@ -838,7 +958,9 @@ export class App {
   async startPause(err) {
     const step = this.pause ? Math.min(this.pause.step + 1, 10) : 0;
     const growing = Math.min(PAUSE_DEFAULT * 2 ** step, PAUSE_MAX);
-    const wanted = err.retryAfter !== undefined ? err.retryAfter : growing;
+    // A first pause takes Retry-After as given; a pause in a row grows all the same.
+    let wanted = err.retryAfter !== undefined ? err.retryAfter : growing;
+    if (this.pause && err.retryAfter !== undefined) wanted = Math.max(wanted, growing);
     const left = Math.min(Math.max(wanted, PAUSE_MIN), PAUSE_MAX);
     this.pause = { until: this.now() + left, due: this.monotonic() + left, code: err.code, step };
     this.logger.warn(`OpenAgenda paused for ${Math.round(left / 1000)} s (${err.code})`);
@@ -929,49 +1051,73 @@ export class App {
       return;
     }
     const max = this.config.maxEvents;
-    const occurrences = [];
+    /** occurrence id -> occurrence: an id read twice (pages that overlap) counts once. */
+    const found = new Map();
     const licences = new Map();
     const licensors = new Map();
-    let after;
     let truncated = false;
-    try {
+    // Kept bounded while reading: the `max` soonest, the rest dropped at each page.
+    const trim = () => {
+      if (found.size <= max) return;
+      const kept = [...found.values()].sort(byStart).slice(0, max);
+      found.clear();
+      for (const o of kept) found.set(o.id, o);
+      truncated = true;
+    };
+    /**
+     * Reads the pages of [lo, hi], all or until the soonest `max` are known
+     * (`early`: the API orders by the next timing to come, so only the
+     * upcoming part may stop early).
+     */
+    const readRange = async (lo, hi, { early, pages }) => {
+      let after;
+      const seen = new Set();
       for (let page = 0; ; page += 1) {
-        if (page >= MAX_PAGES) {
-          truncated = true;
-          break;
-        }
+        if (page >= pages) return 'cut';
         const json = await this.ask(
           gen,
-          eventsUrl(src.uid, { lang: src.lang, city: src.city, from, to, after }),
+          eventsUrl(src.uid, { lang: src.lang, city: src.city, from: lo, to: hi, after }),
         );
-        if (gen !== this.generation) return;
+        if (gen !== this.generation) return 'stopped';
         const result = parseEventsPage(json);
-        // The latest first occurrence of this page: the next pages start later.
+        // The latest first upcoming occurrence of this page: the next pages start later.
         let pageFirst = -Infinity;
         for (const event of result.events) {
           const one = occurrencesOf(event, { lang: src.lang, from, to });
-          occurrences.push(...one.occurrences);
-          if (one.occurrences.length > 0) {
-            pageFirst = Math.max(pageFirst, Math.min(...one.occurrences.map((o) => o.start)));
+          for (const o of one.occurrences) found.set(o.id, o);
+          const upcoming = one.occurrences.filter((o) => o.end > now);
+          if (upcoming.length > 0) {
+            pageFirst = Math.max(pageFirst, Math.min(...upcoming.map((o) => o.start)));
           }
           if (one.occurrences.length > 0 && one.rights) {
             const lic = one.rights.licence ?? '';
             licences.set(lic, (licences.get(lic) ?? 0) + 1);
-            if (one.rights.licensor)
+            if (one.rights.licensor) {
               licensors.set(one.rights.licensor, (licensors.get(one.rights.licensor) ?? 0) + 1);
+            }
           }
         }
+        trim();
         after = result.after;
-        if (!after || result.events.length === 0) break;
-        // Sorted by timing: once `max` occurrences end before what the next
-        // pages can start with, the next pages only hold later ones.
-        if (occurrences.length >= max) {
-          occurrences.sort((a, b) => a.start - b.start);
-          if (occurrences[max - 1].start <= pageFirst) {
-            truncated = true;
-            break;
-          }
+        if (!after || result.events.length === 0) return 'end';
+        // A cursor served twice would loop: the list ends there.
+        const key = after.join('\u0000');
+        if (seen.has(key)) return 'end';
+        seen.add(key);
+        if (early && found.size >= max) {
+          const last = [...found.values()].sort(byStart)[max - 1];
+          if (last.start <= pageFirst) return 'cut';
         }
+      }
+    };
+    try {
+      const ended = await readRange(from, to, { early: true, pages: MAX_PAGES });
+      if (ended === 'stopped') return;
+      if (ended === 'cut') {
+        truncated = true;
+        // Cut early, the events whose timings are all past (yesterday,
+        // listed last by the API) were not reached: read on their own.
+        if ((await readRange(from, now, { early: false, pages: PAST_PAGES })) === 'stopped') return;
       }
     } catch (err) {
       if (err?.code === 'stopped' || gen !== this.generation) return;
@@ -991,11 +1137,8 @@ export class App {
       this.publishStatus();
       return;
     }
-    occurrences.sort((a, b) => a.start - b.start || (a.id < b.id ? -1 : 1));
-    if (occurrences.length > max) {
-      occurrences.length = max;
-      truncated = true;
-    }
+    trim();
+    const occurrences = [...found.values()].sort(byStart);
     const top = (m) =>
       [...m.entries()]
         .sort((a, b) => b[1] - a[1])
@@ -1013,15 +1156,18 @@ export class App {
     };
     src.failures = 0;
     src.error = undefined;
-    this.gladysError = false;
     await this.save();
     this.publishStatus();
+    let failed = false;
     for (const account of this.accounts.values()) {
       if (gen !== this.generation) return;
       if (account.lang !== src.lang || account.city !== src.city) continue;
       if (!this.uidsOf(account).includes(src.uid)) continue;
-      await this.pushCalendar(gen, account, src);
+      if ((await this.pushCalendar(gen, account, src)) === 'failed') failed = true;
     }
+    // Every calendar of the other sources is pushed again too on a retry
+    // (those already holding their read are skipped by their signature).
+    if (failed || this.gladysError) this.afterPushes(gen, failed);
   }
 
   /** When every source with a read answers 401/403, the key is tested on the agendas list. */
@@ -1046,9 +1192,10 @@ export class App {
     const interval = this.config.refreshHours * HOUR;
     // Held by a pause (429, 5xx): read again as soon as the pause ends.
     if (src.error === 'rate_limited' || src.error === 'server') return 0;
-    if (src.failures > 0) {
-      return Math.min(RETRY_STEPS[Math.min(src.failures, RETRY_STEPS.length) - 1], interval);
-    }
+    // A gone agenda (404) waits the interval; other failures 5, 15, 30 min,
+    // 1 h, then the interval.
+    if (src.error === 'not_found' || src.failures > RETRY_STEPS.length) return interval;
+    if (src.failures > 0) return Math.min(RETRY_STEPS[src.failures - 1], interval);
     return interval;
   }
 

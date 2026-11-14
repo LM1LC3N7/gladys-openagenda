@@ -83,6 +83,16 @@ export function createSource(clock) {
       throw err;
     }
     if (out instanceof Response) return out;
+    // Like the API: an event only carries the fields asked in includeFields[].
+    if (out && kind === 'events' && Array.isArray(out.events)) {
+      const fields = new Set(u.searchParams.getAll('includeFields[]'));
+      out = {
+        ...out,
+        events: out.events.map((e) =>
+          Object.fromEntries(Object.entries(e).filter(([k]) => fields.has(k))),
+        ),
+      };
+    }
     if (out === undefined) {
       if (kind === 'agendas') {
         const slugs = u.searchParams.getAll('slug[]');
@@ -102,6 +112,12 @@ export function createSource(clock) {
         out = page(slice, more ? [String(at + size)] : null, source.eventList.length);
       } else {
         return new Response('nope', { status: 404 });
+      }
+      if (kind === 'events') {
+        const fields = new Set(u.searchParams.getAll('includeFields[]'));
+        out.events = out.events.map((e) =>
+          Object.fromEntries(Object.entries(e).filter(([k]) => fields.has(k))),
+        );
       }
     }
     return json(out);

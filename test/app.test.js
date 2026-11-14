@@ -363,8 +363,13 @@ test('a calendar turned off is skipped; turned back on, it is refilled without a
   env.gladys.fake.calendarEvents = [];
   await env.gladys.fake.calendarAccountUpdated('alice');
   await env.wait(SECOND);
+  const posts = () =>
+    env.gladys.fake.requests.filter((r) => r.path.startsWith('/calendar') && r.method === 'POST')
+      .length;
+  const writes = posts();
   await env.wait(6 * HOUR + MINUTE);
   assert.equal(env.events().length, 0, 'nothing pushed to a calendar turned off');
+  assert.equal(posts(), writes, 'not even tried');
   const reads = env.source.count('events');
   cal.sync = true;
   await env.gladys.fake.calendarAccountUpdated('alice');
@@ -637,4 +642,296 @@ test('the cap keeps the soonest slots even when an event of the first page has m
   assert.equal(env.source.count('events'), 2, 'the second page is read');
   assert.equal(env.events().length, 50);
   assert.ok(env.events().some((e) => e.name === 'Bientôt'));
+});
+
+// --- Review r1 ---------------------------------------------------------------
+
+test('r1 I1: an event served twice (pages that overlap, a cursor served again) counts once', async (t) => {
+  const store = createMemoryStore();
+  const env = await setup({ store, start: false });
+  t.after(() => teardown(env));
+  const day = Math.floor(NOW / DAY) * DAY;
+  const a = event({ uid: 1002, timings: [[day + DAY, day + DAY + HOUR]] });
+  const b = event({ uid: 1003, timings: [[day + 2 * DAY, day + 2 * DAY + HOUR]] });
+  env.source.events = (r) => {
+    const after = r.u.searchParams.getAll('after[]');
+    if (after.length === 0) return page([a], ['c1']);
+    if (after[0] === 'c1') return page([a, b], ['c2']);
+    return page([b], ['c2']); // the same cursor again, for ever
+  };
+  await env.gladys.connect();
+  await env.wait(30 * SECOND);
+  assert.deepEqual(
+    env
+      .events()
+      .map((e) => e.name)
+      .sort(),
+    ['Concert 1002', 'Concert 1003'],
+  );
+  assert.ok(env.source.count('events') <= 4, 'a cursor served again ends the list');
+  const ids = store.data.sources[0].cache.packed.occ.map((o) => o[1]);
+  assert.equal(new Set(ids).size, ids.length);
+});
+
+test('r1 I1: a cache with a doubled id in /data is kept once at restart', async (t) => {
+  const store = createMemoryStore();
+  const env = await start(t, { store });
+  await env.app.stop();
+  const c = store.data.sources[0].cache.packed;
+  c.occ.push([...c.occ[0]]);
+  env.gladys.fake.calendarEvents = [];
+  const again = await setup({ store, now: env.clock.now() + HOUR });
+  t.after(() => teardown(again));
+  assert.equal(again.source.count('events'), 0);
+  assert.equal(again.events().length, 4);
+});
+
+test('r1 I2: a Gladys write failing half-way is pushed again from the last read, 5 min later', async (t) => {
+  const env = await start(t);
+  const original = env.gladys.publishCalendarEvents.bind(env.gladys);
+  let fail = 1;
+  env.gladys.publishCalendarEvents = async (...args) => {
+    if (fail > 0) {
+      fail -= 1;
+      throw Object.assign(new Error('boom'), { name: 'GladysApiError', status: 500 });
+    }
+    return original(...args);
+  };
+  const day = Math.floor(NOW / DAY) * DAY;
+  env.source.eventList = [
+    event({ uid: 777, title: 'Nouveau', timings: [[day + DAY, day + DAY + HOUR]] }),
+  ];
+  await env.wait(6 * HOUR + SECOND);
+  assert.equal(env.events().length, 4, 'not taken: the old read stays');
+  assert.match(statusText(env), /Gladys refused or did not take/);
+  const reads = env.source.count('events');
+  await env.wait(5 * MINUTE + SECOND);
+  assert.deepEqual(
+    env.events().map((e) => e.name),
+    ['Nouveau'],
+  );
+  assert.equal(env.source.count('events'), reads, 'from the last read, no request');
+  assert.doesNotMatch(statusText(env), /Gladys refused/);
+});
+
+test('r1 I3: /data written under its read bound, never unreadable at restart', async (t) => {
+  const { App, packOccurrences } = await import('../src/app.js');
+  const { MAX_SAVE_BYTES, MAX_STATE_BYTES } = await import('../src/constants.js');
+  assert.ok(MAX_SAVE_BYTES * 1.5 <= MAX_STATE_BYTES);
+  const store = createMemoryStore();
+  const env = await start(t, { store });
+  // 30 big sources in memory (2000 slots, distinct long texts each).
+  for (let k = 0; k < 30; k += 1) {
+    const occurrences = Array.from({ length: 2000 }, (_, i) => ({
+      id: `${k * 10_000 + i}-${1_800_000_000 + i}`,
+      start: NOW + i * HOUR,
+      end: NOW + i * HOUR + HOUR,
+      name: `Titre ${k}-${i} `.padEnd(150, 'x'),
+      description: `Description ${i} `.padEnd(400, 'y'),
+      location: 'Lieu '.padEnd(300, 'z'),
+      url: `https://openagenda.com/x/events/${i}`,
+    }));
+    env.app.sources.set(`9${k}|fr|`, {
+      key: `9${k}|fr|`,
+      uid: 900 + k,
+      lang: 'fr',
+      failures: 0,
+      attemptAt: env.clock.now(),
+      cache: { at: env.clock.now(), occurrences, licences: [], licensors: [], truncated: false },
+    });
+  }
+  assert.equal(await env.app.save(), true);
+  assert.ok(Buffer.byteLength(JSON.stringify(store.data)) <= MAX_SAVE_BYTES);
+  assert.ok(App && packOccurrences);
+  // A recurring event costs its texts once.
+  const packed = packOccurrences(
+    Array.from({ length: 100 }, (_, i) => ({
+      id: `1-${i}`,
+      start: i,
+      end: i,
+      name: 'n',
+      description: 'd',
+    })),
+  );
+  assert.equal(packed.texts.length, 1);
+  await env.app.stop();
+  const again = await setup({ store, now: env.clock.now() + HOUR });
+  t.after(() => teardown(again));
+  assert.doesNotMatch(statusText(again), /unreadable/);
+  assert.equal(again.status().connected, true);
+});
+
+test('r1 I4: an agenda gone (404) or private (403) is asked again at the interval, not hourly', async (t) => {
+  const env = await setup({ accounts: [account('alice', 'testville, 999')], start: false });
+  t.after(() => teardown(env));
+  env.source.events = (r) => (r.uid === 999 ? json({}, 404) : undefined);
+  await env.gladys.connect();
+  await env.wait(48 * HOUR);
+  // 404: at once, then every 6 h.
+  assert.equal(env.source.requests.filter((r) => r.uid === 999).length, 8);
+  env.source.events = (r) => (r.uid === 999 ? json({}, 403) : undefined);
+  const before = env.source.requests.filter((r) => r.uid === 999).length;
+  await env.wait(48 * HOUR);
+  // 403: 5, 15, 30, 60 min, then every 6 h: at most 4 + 8 + 1 in 48 h.
+  const n = env.source.requests.filter((r) => r.uid === 999).length - before;
+  assert.ok(n <= 13, `${n} requests in 48 h`);
+});
+
+test('r1 I5: two requests always 2 s apart at least', async (t) => {
+  const env = await start(t, { accounts: [account('alice', 'testville, 2, 3, 4')] });
+  await env.wait(MINUTE);
+  const at = env.source.requests.map((r) => r.at);
+  assert.ok(at.length >= 5);
+  for (let i = 1; i < at.length; i += 1)
+    assert.ok(at[i] - at[i - 1] >= 2 * SECOND - 1, `gap ${at[i] - at[i - 1]}`);
+});
+
+test('r1 I5: the update date (Licence Ouverte) is asked and credited', async (t) => {
+  const env = await start(t);
+  assert.ok(env.events().every((e) => / mis à jour le 2026-11-01$/.test(e.description)));
+});
+
+test('r1 I5: two users, one agenda, two cities: two reads, each served', async (t) => {
+  const env = await start(t, {
+    accounts: [
+      account('alice', 'testville', { city: 'Rennes' }),
+      account('bob', 'testville', { city: 'Brest' }),
+    ],
+  });
+  const cities = env.source.requests
+    .filter((r) => r.kind === 'events')
+    .map((r) => r.u.searchParams.get('adminLevel4'));
+  assert.deepEqual(cities.sort(), ['Brest', 'Rennes']);
+  assert.equal(env.events('alice').length, 4);
+  assert.equal(env.events('bob').length, 4);
+});
+
+test('r1 I5: a timing given twice is one event; 800 timings at most per event', async (t) => {
+  const day = Math.floor(NOW / DAY) * DAY;
+  const env = await setup({
+    config: { api_key: KEY, max_events: 2000, horizon_days: 365 },
+    start: false,
+  });
+  t.after(() => teardown(env));
+  const twice = [day + DAY, day + DAY + HOUR];
+  env.source.eventList = [
+    event({ uid: 1, timings: [twice, twice] }),
+    event({
+      uid: 2,
+      timings: Array.from({ length: 900 }, (_, k) => [
+        day + DAY + k * 6 * HOUR,
+        day + DAY + k * 6 * HOUR + HOUR,
+      ]),
+    }),
+  ];
+  await env.gladys.connect();
+  await env.wait(30 * SECOND);
+  assert.equal(env.events().filter((e) => e.name === 'Concert 1').length, 1);
+  assert.equal(env.events().filter((e) => e.name === 'Concert 2').length, 800);
+});
+
+test('r1 I5: yesterday evening stays a day', async (t) => {
+  const day = Math.floor(NOW / DAY) * DAY;
+  const env = await setup({ start: false });
+  t.after(() => teardown(env));
+  env.source.eventList = [
+    event({ uid: 3, title: 'Hier', timings: [[day - 4 * HOUR, day - 2 * HOUR]] }),
+  ];
+  await env.gladys.connect();
+  await env.wait(10 * SECOND);
+  assert.deepEqual(
+    env.events().map((e) => e.name),
+    ['Hier'],
+  );
+});
+
+test('r1 I5: sync turned off and on while disconnected: refilled at the reconnection', async (t) => {
+  const env = await start(t);
+  await env.gladys.disconnect();
+  await env.wait(SECOND);
+  env.gladys.fake.calendarEvents = []; // emptied by the core while off
+  await env.gladys.connect();
+  await env.wait(10 * SECOND);
+  assert.equal(env.events().length, 4);
+  assert.equal(env.source.count('events'), 1);
+});
+
+test('r1 I5: a 403 on a write (sync just turned off) stops that calendar, no retry', async (t) => {
+  const env = await start(t);
+  env.gladys.fake.calendars[0].sync = false; // turned off, no notice yet
+  const day = Math.floor(NOW / DAY) * DAY;
+  env.source.eventList = [event({ uid: 9, timings: [[day + DAY, day + DAY + HOUR]] })];
+  await env.wait(6 * HOUR + SECOND);
+  const writes = env.gladys.fake.requests.filter((r) => r.path === '/calendar/event').length;
+  await env.wait(2 * HOUR);
+  assert.equal(env.gladys.fake.requests.filter((r) => r.path === '/calendar/event').length, writes);
+  assert.doesNotMatch(statusText(env), /Gladys refused/);
+});
+
+test('r1 I5: an event without a licence makes the calendar say so', async (t) => {
+  const day = Math.floor(NOW / DAY) * DAY;
+  const env = await setup({ start: false });
+  t.after(() => teardown(env));
+  env.source.eventList = [
+    event({ uid: 4, timings: [[day + DAY, day + DAY + HOUR]], rights: null }),
+    event({ uid: 5, timings: [[day + DAY, day + DAY + HOUR]] }),
+  ];
+  await env.gladys.connect();
+  await env.wait(10 * SECOND);
+  assert.match(
+    env.gladys.fake.calendars[0].description,
+    /Licence des données : Licence Ouverte v2\.0 \(Etalab\), non indiquée/,
+  );
+});
+
+test('r1 M1: an unreadable city reads and pushes nothing for that account, deletes nothing', async (t) => {
+  const env = await start(t);
+  env.gladys.fake.calendarAccounts = [
+    account('alice', 'testville, autre', { city: 'Paris 15e !!' }),
+  ];
+  await env.gladys.fake.calendarAccountUpdated('alice');
+  await env.wait(7 * HOUR);
+  assert.equal(env.source.count('events'), 1);
+  assert.equal(env.gladys.fake.deletedCalendars.length, 0);
+  assert.match(statusText(env), /unreadable city/);
+});
+
+test('r1 M3: 429 in a row with a constant Retry-After: the pause grows', async (t) => {
+  const env = await start(t);
+  env.source.events = () => json({}, 429, { 'retry-after': '120' });
+  await env.wait(6 * HOUR + 2 * HOUR);
+  assert.ok(env.source.count('events') <= 6, `${env.source.count('events')} requests`);
+});
+
+test('r1 M5: a read that changes nothing writes nothing to Gladys', async (t) => {
+  const env = await start(t);
+  const writes = () =>
+    env.gladys.fake.requests.filter((r) => r.method !== 'GET' && r.path.startsWith('/calendar'))
+      .length;
+  const before = writes();
+  await env.wait(6 * HOUR + MINUTE);
+  assert.equal(env.source.count('events'), 2);
+  assert.equal(writes(), before);
+});
+
+test('r1 M6: the cap reached early, yesterday is still read', async (t) => {
+  const day = Math.floor(NOW / DAY) * DAY;
+  const env = await setup({ config: { api_key: KEY, max_events: 50 }, start: false });
+  t.after(() => teardown(env));
+  const future = Array.from({ length: 60 }, (_, k) =>
+    event({ uid: 100 + k, timings: [[day + DAY + k * HOUR, day + DAY + k * HOUR + HOUR]] }),
+  );
+  const past = event({ uid: 99, title: 'Hier', timings: [[day - 4 * HOUR, day - 3 * HOUR]] });
+  env.source.events = (r) => {
+    const lte = Date.parse(r.u.searchParams.get('timings[lte]'));
+    if (lte < day + DAY) return page([past], null); // the past range only
+    // The API lists the upcoming first, the past last.
+    const after = r.u.searchParams.getAll('after[]');
+    if (after.length === 0) return page(future, ['p2']);
+    return page([past], null);
+  };
+  await env.gladys.connect();
+  await env.wait(20 * SECOND);
+  assert.ok(env.events().some((e) => e.name === 'Hier'));
+  assert.equal(env.events().length, 50);
 });

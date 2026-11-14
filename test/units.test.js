@@ -342,3 +342,30 @@ test('HTTP: statuses mapped, the body bounded, Retry-After read', async () => {
   assert.equal(retryAfterMs('-5', 0), undefined);
   assert.equal(retryAfterMs('soon', 0), undefined);
 });
+
+test('r1 M2: HTML tags, entities, bidi and zero-width characters out of the texts', () => {
+  assert.equal(
+    clean('<b>Jazz</b> &amp; <img src=x onerror=alert(1)>blues&#33; &lt;3', 100),
+    'Jazz & blues! <3',
+  );
+  assert.equal(clean('a‮b​c⁦d﻿', 100), 'abcd');
+  assert.equal(clean('&unknown; &#x1F600;', 100), '&unknown; 😀');
+});
+
+test('r1: a timing given twice in one event is one occurrence', () => {
+  const r = occurrencesOf(
+    event({
+      uid: 11,
+      timings: [
+        [T0, T0 + HOUR],
+        [T0, T0 + HOUR],
+      ],
+    }),
+    {
+      lang: 'fr',
+      from: T0 - DAY,
+      to: T0 + DAY,
+    },
+  );
+  assert.equal(r.occurrences.length, 1);
+});

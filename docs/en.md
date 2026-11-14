@@ -42,7 +42,9 @@ integration for themselves (their consent) and gives:
   (`https://openagenda.com/my-city-agenda`), its short name (the end of the
   link) or its number (`https://openagenda.com/agendas/12345678`).
 - **City** (optional): only the events in this city, written as OpenAgenda
-  writes it (the "commune" of the places).
+  writes it (the "commune" of the places). An unreadable city (signs other
+  than letters, digits, space, apostrophe, dot, hyphen, brackets): nothing is
+  read nor changed for that account until it is fixed.
 
 Each agenda becomes a **private** calendar of that user. To have it seen by the
 whole household and able to trigger scenes, share it ("Shared" toggle). The
@@ -62,7 +64,11 @@ its calendar (once OpenAgenda has answered for every entry of the list).
 
 Rhythm: an agenda is read once per interval, all its pages in a row, one request
 at a time, 2 s apart at least. After a failure: tried again 5 min, 15 min,
-30 min, 1 h later, then at the interval. A restart, a reconnection, a new
+30 min, 1 h later, then at the interval; an agenda not found (404) waits the
+interval at once. Texts are cleaned (HTML tags, entities, invisible and
+direction-changing characters removed). An event seen twice (pages that overlap)
+counts once. When the time-slot cap is reached before the last page, yesterday's
+events are read on their own (the API lists them last). A restart, a reconnection, a new
 account following an agenda already read or a toggle start no read: the last
 read, kept in `/data`, is published again. Two users following the same agenda
 in the same language and city share one read.
@@ -103,10 +109,17 @@ never shown back), and a pause if any.
   automatic request any more, restarts included, until a new key or a successful
   click on **Test the key**. A 403 on a single agenda is not a refused key.
 - **429 or 5xx**: every request stops for the time given by `Retry-After` (1 min
-  to 6 h), else 10 min, then 20, 40… up to 6 h; the pause is kept in `/data`.
+  to 6 h), else 10 min, then 20, 40… up to 6 h; refusals in a row lengthen it even
+  with a short `Retry-After`; the pause is kept in `/data`.
 - **Read cut short** (network, unreadable answer or over 6 MB): nothing is sent
   to Gladys, the calendar keeps the previous read.
 - **Gladys** takes 30 calendar writes a minute: the integration makes 25 at most
-  and, on a 429, waits a minute and writes again (3 times at most).
-- **`/data` unreadable**: nothing asked to OpenAgenda, read again every 10 s.
+  and, on a 429, waits a minute and writes again (3 times at most). A calendar
+  Gladys did not take whole is sent again from the last read (no request to
+  OpenAgenda) 5, 15, 30 min later, then every hour, until it goes through. A read
+  that changes nothing writes nothing; a reconnection to Gladys sends everything
+  once.
+- **`/data` unreadable**: nothing asked to OpenAgenda, read again every 10 s. The
+  file is written under 16 MB (read up to 32 MB): past it, the oldest reads stay
+  in memory only (their calendars keep their events).
   **`/data` not writable**: no read (a restart could not know it happened).
