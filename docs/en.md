@@ -1,61 +1,112 @@
-# Demo Devices Template
+# OpenAgenda
 
-This is the user documentation of the integration. Gladys re-hosts this file
-and shows a permanent **Documentation** link to it in the Configuration screen
-(in the user's language, with English as the fallback) — it is when
-configuring that the user needs it most. Keep the short onboarding hints in
-the `section` blocks of the manifest `config_schema`; put the long
-step-by-step (screenshots, troubleshooting…) here.
+**Unofficial integration**, not affiliated with OpenAgenda. Never tested with a
+real OpenAgenda key: the answer format comes from the official API v2
+documentation (developers.openagenda.com, read on 2026-11-14, when the API
+answered 403 without a key, as documented). The test answers are made up.
 
-## What you get
+The cultural agendas published on [OpenAgenda](https://openagenda.com) (concerts,
+exhibitions, shows, events of your town…) become Gladys calendars: calendar view,
+"An event is coming" scene trigger, calendar scene actions and the assistant, like
+a CalDAV calendar.
 
-Six demo devices show up after installation: a weather station (real data
-from Open-Meteo), a switch, a dimmable light, a smart plug with power
-metering, a motion sensor and a camera.
+## What you need
 
-## Configuration
+- A free OpenAgenda account and its **public key** (`oa_pk_…`), in
+  [your account settings](https://openagenda.com/settings/apiKey). A secret key
+  (`oa_sk_…`) is refused: it can write to your agendas, and the integration only
+  reads.
+- Gladys 5.3.0 or later.
 
-1. Open the **Configuration** tab of the integration.
-2. Set the **latitude** and **longitude** the demo weather station should
-   observe (they default to Paris), and pick your temperature unit.
-   The **refresh interval** sets how often the weather station and the
-   plug's power are read: every 5 minutes by default, every minute at most.
-3. Save: the devices appear in the **Discovery** tab, ready to be added.
+## Configuration (administrator)
 
-The **Prefer the local connection** toggle drives the demo plug: it reports
-the channel it actually uses as a badge (local or cloud), with an orange dot
-when it runs degraded (local refused, cloud fallback).
+1. **Configuration** tab: paste the public key. It is kept by Gladys in its
+   database, never shown again, sent only to OpenAgenda (`key` header, never in
+   an address).
+2. Optional settings:
+   - **Refresh interval**: each agenda is read again every 6 h by default (2 to
+     24 h).
+   - **Days ahead**: 60 days by default (7 to 365). Yesterday's events stay a
+     day, then go.
+   - **Time slots per agenda**: 500 by default (50 to 2,000), the soonest first.
+     An event on several dates counts one slot per date.
+3. **Test the key**: one small request to OpenAgenda; the answer lists the
+   agendas followed and the licence of their data.
 
-## Actions
+## Your agendas (each user)
 
-- **Test the weather provider** — performs a live request to Open-Meteo and
-  shows the current temperature and humidity under the button.
-- **Identify a device** — pick one of your devices in the list and it will
-  signal itself (the demo light "blinks" in the logs).
+In the **My calendars** block of the integration page, each user enables the
+integration for themselves (their consent) and gives:
 
-## Scenes
+- **Agendas**: up to 10, separated by commas: the link of the agenda
+  (`https://openagenda.com/my-city-agenda`), its short name (the end of the
+  link) or its number (`https://openagenda.com/agendas/12345678`).
+- **City** (optional): only the events in this city, written as OpenAgenda
+  writes it (the "commune" of the places).
 
-The integration adds its own cards to the scene editor (Gladys 5.1 or
-later), under the **Integrations** category:
+Each agenda becomes a **private** calendar of that user. To have it seen by the
+whole household and able to trigger scenes, share it ("Shared" toggle). The
+"Sync" toggle empties and stops it; turned back on, it is filled again from the
+last read, without asking OpenAgenda. Removing an agenda from the list deletes
+its calendar (once OpenAgenda has answered for every entry of the list).
 
-- **Motion detected** (trigger) — starts the scene when a demo motion sensor
-  sees something move. Optionally pick the sensor and what moved (person,
-  animal); left empty, any detection matches. The following actions can
-  read what moved with `{{triggerEvent.data.target}}`.
-- **Identify a device** (action) — makes the chosen device signal itself.
-  It returns whether the device could signal itself, so the following
-  actions can depend on it.
+## What is read
 
-## Dashboard
+- The **published** events of the agendas, in the user's language (French by
+  default), from yesterday to the horizon set. Each date of an event is one
+  Gladys event (start, end, place, link to OpenAgenda).
+- Left out: **cancelled** and **postponed** events. Marked: "Full:" and
+  "Online:". A time without a time zone, an end before the start or a slot
+  longer than 48 h is not read.
+- An event removed from the agenda leaves Gladys at the next read.
 
-Add the **Demo status** widget to a dashboard: it shows the live
-temperature of the weather station and the power of the office plug, the
-connection the plug currently uses (orange when degraded) and the observed
-location. Its **Identify the light** button makes the demo light signal
-itself.
+Rhythm: an agenda is read once per interval, all its pages in a row, one request
+at a time, 2 s apart at least. After a failure: tried again 5 min, 15 min,
+30 min, 1 h later, then at the interval. A restart, a reconnection, a new
+account following an agenda already read or a toggle start no read: the last
+read, kept in `/data`, is published again. Two users following the same agenda
+in the same language and city share one read.
 
-## Troubleshooting
+## Data licence
 
-The integration logs everything it does: check the integration logs from the
-Gladys UI (or `docker logs` on the host) with `LOG_LEVEL=debug` for the full
-detail.
+The licence is set by each publisher, **event by event** (the `rights` field of
+the API): most often the **Licence Ouverte / Etalab 2.0** (French open licence),
+which allows reuse, commercial included, crediting the source and the date of
+the last update. The integration therefore shows it:
+
+- in the description of **each event**: "Source: <publisher> via OpenAgenda,
+  licence <licence>, updated <date>" ("licence not stated" when the publisher
+  gives none);
+- in the description of **each calendar**: the licences and sources seen at the
+  last read;
+- in the answer of the **Test the key** button, agenda by agenda.
+
+Check an agenda's licence before reusing its data outside Gladys: the terms are
+at <https://developers.openagenda.com/licence>. The integration reads the API
+`https://api.openagenda.com/v2`; nothing is shipped in the image.
+
+## What the integration does not do
+
+- It never writes to OpenAgenda (read only).
+- It does not read the private agendas the key cannot see: the agenda is marked
+  "not readable with this key", the others go on.
+- No full-day events: each slot keeps its times.
+
+## Status and failures
+
+The integration tab shows: the number of agendas followed and read, the date of
+the last read, the agendas in error and why, the accounts to fix (an entry that
+is not an agenda, an agenda not found, an unreadable city; the typed text is
+never shown back), and a pause if any.
+
+- **Key refused** (401 or 403 on the agendas list, the key's own route): no
+  automatic request any more, restarts included, until a new key or a successful
+  click on **Test the key**. A 403 on a single agenda is not a refused key.
+- **429 or 5xx**: every request stops for the time given by `Retry-After` (1 min
+  to 6 h), else 10 min, then 20, 40… up to 6 h; the pause is kept in `/data`.
+- **Read cut short** (network, unreadable answer or over 6 MB): nothing is sent
+  to Gladys, the calendar keeps the previous read.
+- **Gladys** takes 30 calendar writes a minute: the integration makes 25 at most
+  and, on a 429, waits a minute and writes again (3 times at most).
+- **`/data` unreadable**: nothing asked to OpenAgenda, read again every 10 s.
+  **`/data` not writable**: no read (a restart could not know it happened).

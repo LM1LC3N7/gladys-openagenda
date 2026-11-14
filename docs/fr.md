@@ -1,67 +1,117 @@
-# Template de démonstration
+# OpenAgenda
 
-Ceci est la documentation utilisateur de l'intégration. Gladys ré-héberge ce
-fichier et affiche un lien **Documentation** permanent vers lui dans l'écran
-de configuration (dans la langue de l'utilisateur, avec l'anglais en repli) —
-c'est au moment de configurer que l'utilisateur en a le plus besoin. Gardez
-les courtes indications d'accueil dans les blocs `section` du `config_schema`
-du manifest ; mettez ici le pas-à-pas détaillé (captures d'écran, dépannage…).
+**Intégration non officielle**, sans lien avec OpenAgenda. Jamais testée avec une
+vraie clé OpenAgenda : le format des réponses vient de la documentation officielle
+de l’API v2 (developers.openagenda.com, lue le 2026-11-14 ; l’API répondait alors
+403 sans clé, comme documenté). Les réponses des tests sont inventées.
 
-## Ce que vous obtenez
+Les agendas culturels publiés sur [OpenAgenda](https://openagenda.com) (concerts,
+expositions, spectacles, animations de votre ville…) deviennent des calendriers
+Gladys : vue Calendrier, déclencheur de scène « Un événement arrive », actions de
+scène et assistant, comme un calendrier CalDAV.
 
-Six appareils de démonstration apparaissent après l'installation : une
-station météo (vraies données Open-Meteo), un interrupteur, une lampe
-variable, une prise connectée avec mesure de puissance, un détecteur de
-mouvement et une caméra.
+## Ce qu’il faut
 
-## Configuration
+- Un compte OpenAgenda gratuit et sa **clé publique** (`oa_pk_…`), dans
+  [les paramètres du compte](https://openagenda.com/settings/apiKey). Une clé
+  secrète (`oa_sk_…`) est refusée : elle permet d’écrire dans vos agendas, et
+  l’intégration ne fait que lire.
+- Gladys 5.3.0 ou plus récent.
 
-1. Ouvrez l'onglet **Configuration** de l'intégration.
-2. Renseignez la **latitude** et la **longitude** que la station météo de
-   démonstration doit observer (Paris par défaut), et choisissez votre unité
-   de température. L'**intervalle de rafraîchissement** règle la fréquence
-   de lecture de la station météo et de la puissance de la prise : toutes
-   les 5 minutes par défaut, toutes les minutes au plus.
-3. Enregistrez : les appareils apparaissent dans l'onglet **Découverte**,
-   prêts à être ajoutés.
+## Configuration (administrateur)
 
-Le réglage **Préférer la connexion locale** pilote la prise de
-démonstration : elle affiche en badge le canal réellement utilisé (local ou
-cloud), avec un point orange quand elle fonctionne en mode dégradé (local
-refusé, bascule cloud).
+1. Onglet **Configuration** : collez la clé publique. Elle est gardée par Gladys
+   dans sa base, jamais réaffichée, envoyée seulement à OpenAgenda (en-tête
+   `key`, jamais dans une adresse).
+2. Réglages facultatifs :
+   - **Intervalle de rafraîchissement** : chaque agenda est relu toutes les 6 h
+     par défaut (2 à 24 h).
+   - **Jours à venir** : 60 jours par défaut (7 à 365). Les événements de la
+     veille restent un jour, puis disparaissent.
+   - **Créneaux par agenda** : 500 par défaut (50 à 2 000), les plus proches
+     d’abord. Un événement sur plusieurs dates compte un créneau par date.
+3. **Tester la clé** : une petite requête à OpenAgenda ; la réponse liste les
+   agendas suivis et la licence de leurs données.
 
-## Actions
+## Vos agendas (chaque utilisateur)
 
-- **Tester le fournisseur météo** — effectue une requête en direct vers
-  Open-Meteo et affiche la température et l'humidité actuelles sous le
-  bouton.
-- **Identifier un appareil** — choisissez un de vos appareils dans la liste
-  et il se signale (la lampe de démonstration « clignote » dans les logs).
+Dans le bloc **Mes calendriers** de la page de l’intégration, chaque utilisateur
+active l’intégration pour lui-même (c’est son accord) et indique :
 
-## Scènes
+- **Agendas** : jusqu’à 10, séparés par des virgules : le lien de l’agenda
+  (`https://openagenda.com/agenda-de-ma-ville`), son nom court (la fin du lien)
+  ou son numéro (`https://openagenda.com/agendas/12345678`).
+- **Ville** (facultatif) : seulement les événements de cette ville, écrite comme
+  OpenAgenda l’écrit (champ « commune » des lieux).
 
-L'intégration ajoute ses propres cartes à l'éditeur de scènes (Gladys 5.1
-ou plus récent), dans la catégorie **Intégrations** :
+Chaque agenda devient un calendrier **privé** de cet utilisateur. Pour qu’il soit
+vu de tout le foyer et puisse déclencher des scènes, partagez-le (interrupteur
+« Partagé »). L’interrupteur « Synchroniser » le vide et l’arrête ; remis, il est
+rempli de nouveau depuis la dernière lecture, sans nouvelle demande à OpenAgenda.
+Retirer un agenda de la liste supprime son calendrier (une fois qu’OpenAgenda a
+répondu pour chaque entrée de la liste).
 
-- **Mouvement détecté** (déclencheur) — lance la scène quand un détecteur
-  de démonstration voit bouger quelque chose. Choisissez éventuellement le
-  détecteur et ce qui a bougé (personne, animal) ; laissés vides, toute
-  détection correspond. Les actions suivantes peuvent lire ce qui a bougé
-  avec `{{triggerEvent.data.target}}`.
-- **Identifier un appareil** (action) — fait se signaler l'appareil choisi.
-  Elle indique si l'appareil a pu se signaler, pour que les actions
-  suivantes puissent en dépendre.
+## Ce qui est lu
 
-## Tableau de bord
+- Les événements **publiés** des agendas, dans la langue de l’utilisateur
+  (français par défaut), de la veille jusqu’à l’horizon réglé. Chaque date d’un
+  événement est un événement Gladys (début, fin, lieu, lien vers OpenAgenda).
+- Écartés : les événements **annulés** et **reportés**. Marqués : « Complet : »
+  et « En ligne : ». Un horaire sans fuseau, une fin avant le début ou un créneau
+  de plus de 48 h ne sont pas lus.
+- Un événement retiré de l’agenda disparaît de Gladys à la lecture suivante.
 
-Ajoutez le widget **État de la démo** à un tableau de bord : il affiche en
-direct la température de la station météo et la puissance de la prise du
-bureau, la connexion utilisée par la prise (en orange si dégradée) et la
-position observée. Son bouton **Identifier la lampe** fait se signaler la
-lampe de démonstration.
+Rythme : un agenda est lu une fois par intervalle, toutes ses pages d’affilée,
+une requête à la fois, 2 s au moins entre deux. Après un échec : nouvel essai
+5 min, 15 min, 30 min, 1 h plus tard, puis à l’intervalle. Un redémarrage, une
+reconnexion, un nouveau compte qui suit un agenda déjà lu ou un interrupteur ne
+relancent pas de lecture : la dernière lecture, gardée dans `/data`, est
+republiée. Deux utilisateurs qui suivent le même agenda dans la même langue et
+la même ville partagent la même lecture.
 
-## Dépannage
+## Licence des données
 
-L'intégration journalise tout ce qu'elle fait : consultez les logs de
-l'intégration depuis l'interface Gladys (ou `docker logs` sur l'hôte) avec
-`LOG_LEVEL=debug` pour le détail complet.
+La licence est fixée par chaque éditeur, **événement par événement** (champ
+`rights` de l’API) : le plus souvent la **Licence Ouverte / Etalab 2.0**, qui
+permet la réutilisation, y compris commerciale, en citant la source et la date de
+mise à jour. L’intégration l’affiche donc :
+
+- dans la description de **chaque événement** : « Source : <éditeur> via
+  OpenAgenda, licence <licence>, mis à jour le <date> » (« licence non indiquée »
+  quand l’éditeur n’en donne pas) ;
+- dans la description de **chaque calendrier** : les licences et les sources vues
+  à la dernière lecture ;
+- dans la réponse du bouton **Tester la clé**, agenda par agenda.
+
+Vérifiez la licence d’un agenda avant de réutiliser ses données hors de Gladys :
+les conditions sont sur <https://developers.openagenda.com/licence>. L’intégration
+lit l’API `https://api.openagenda.com/v2` ; rien n’est embarqué dans l’image.
+
+## Ce que l’intégration ne fait pas
+
+- Elle n’écrit jamais dans OpenAgenda (lecture seule).
+- Elle ne lit pas les agendas privés que la clé ne peut pas voir : l’agenda est
+  marqué « non lisible avec cette clé », les autres continuent.
+- Pas d’événement sur la journée entière : chaque créneau garde ses heures.
+
+## État et pannes
+
+L’onglet de l’intégration affiche : le nombre d’agendas suivis et lus, la date de
+la dernière lecture, les agendas en erreur et la raison, les comptes à corriger
+(entrée qui n’est pas un agenda, agenda introuvable, ville illisible ; le texte
+saisi n’est jamais réaffiché), et une pause éventuelle.
+
+- **Clé refusée** (401 ou 403 sur la liste des agendas, la route propre à la
+  clé) : plus aucune demande automatique, même après un redémarrage, jusqu’à une
+  nouvelle clé ou un clic réussi sur **Tester la clé**. Un 403 sur un seul agenda
+  n’est pas un refus de la clé.
+- **429 ou 5xx** : toutes les demandes s’arrêtent le temps indiqué par
+  `Retry-After` (1 min à 6 h), sinon 10 min, puis 20, 40… jusqu’à 6 h ; la pause
+  est gardée dans `/data`.
+- **Lecture interrompue** (réseau, réponse illisible ou de plus de 6 Mo) : rien
+  n’est envoyé à Gladys, le calendrier garde la lecture précédente.
+- **Gladys** accepte 30 écritures de calendrier par minute : l’intégration en fait
+  25 au plus et, sur un refus 429, attend une minute puis réécrit (3 fois au plus).
+- **`/data` illisible** : rien n’est demandé à OpenAgenda, relecture toutes les
+  10 s. **`/data` non inscriptible** : aucune lecture (un redémarrage ne saurait
+  pas qu’elle a eu lieu).

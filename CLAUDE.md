@@ -5,59 +5,67 @@ contributors.
 
 ## What this is
 
-A Gladys Assistant **external integration**: a Node.js service (Node 22+, ESM,
-no build step) that runs in its own sandboxed Docker container and talks to
-Gladys through
-[`@gladysassistant/integration-sdk`](https://github.com/GladysAssistant/integration-sdk-js),
-its only runtime dependency. It started from the official JavaScript template.
+A Gladys Assistant **external integration** of type `calendar` (Node.js 22+,
+ESM, no build step, sandboxed Docker container, `@gladysassistant/integration-sdk`
+0.16). It reads the published events of the OpenAgenda agendas each user
+follows (official API v2, the administrator's free public key) and pushes them
+as Gladys calendars, one per user and agenda. Unofficial. Read-only.
 
 ## Commands
 
 ```bash
 npm install
-npm test                                  # node --test, the built-in runner
-node --test test/devices.test.js          # one file
-node --test --test-name-pattern "plug"    # tests whose name matches
-npm run lint                              # ESLint
-npm run format:check                      # Prettier, as the CI runs it
-npm run format                            # Prettier, fix in place
-npx github:GladysAssistant/integration-store .   # store admission checks
+npm test                                  # node --test (or gi test)
+npm run lint && npm run format:check
+memcap node scripts/mutants.mjs           # mutation check, one mutant at a time
 ```
-
-The CI (`.github/workflows/ci.yml`) runs `format:check`, `lint` and `test` on
-Node 22 and 24, and builds the Docker image: run the three commands before
-pushing.
 
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
-src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
-gladys-assistant-integration.json manifest: name, config_schema, actions, image...
-docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
-.github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
+index.js            SDK wiring only (src/handlers.js)
+src/app.js          App: lifecycle, config, accounts, /data, schedule, requests,
+                    refused key, pauses, calendar writes, status, test button
+src/openagenda.js   API v2 URLs and strict reading of its answers (pure)
+src/windows.js      disjoint sub-windows of at most 500 events (pure)
+src/config.js       the form and the accounts normalized, the refused key's tag
+src/http.js         the only network access (key header, User-Agent, bounds)
+src/store.js        /data state file (missing vs unreadable, atomic write, 0600)
+src/i18n.js         status, button and calendar texts (en, fr)
+src/constants.js    manifest keys, bounds, rhythm
 ```
+
+## Module rules
+
+- **Never more than the interval**: an agenda is read once per refresh
+  interval (2 h at least); a restart, a reconnection, an account change or a
+  toggle republish the last read from /data, never read again; the attempt is
+  in /data before the read.
+- **Never a partial list**: a read cut short pushes nothing (the windows
+  prune what they do not list).
+- **The licence**: read event by event (`rights`), credited in every event and
+  every calendar; never dropped by a cut (the credit is kept, the summary cut).
+- **The key**: never in a URL, a log, a status, /data or an error; a 401/403
+  is a refusal only on `/v2/agendas`.
+- **Ids are forever**: calendar `<user>:agenda-<uid>`, event
+  `<user>:a<uid>-<event uid>-<start s>`, config, account and action keys.
+- Bilingual texts (en/fr), CHANGELOG `[Unreleased]`, versions by the Release
+  workflow only.
 
 ## Rules
 
-- **External ids are forever.** Build them with
-  `gladys.externalIds(type, platformId)`, `platformId` being the unique id the
-  platform gives the device (serial, cloud id, MAC), never a label. Gladys keys
-  devices, their history, scenes and dashboards on them: changing one creates a
-  new device and orphans the old one. The same goes for every key users store:
-  manifest `config_schema`, `actions`, widget and scene keys, feature keys.
+- **External ids are forever.** Calendar and event ids are user-scoped
+  (`gladys.externalId(`${user}:…`)`, the core's `ext:<selector>:<user>:`
+  prefix); changing a rule creates new calendars and orphans the old ones. The
+  same goes for every key users store: `config_schema`, `account_schema`,
+  `actions`.
 - **The container rootfs is read-only.** Write only under `/data`, the one
   writable volume. Never log tokens, passwords or API keys.
 - **Versions belong to the Release workflow** (Actions → Release). Never edit
   `version` in `package.json` or in the manifest, nor the `docker_image` tag,
-  by hand — except on the README's hand-pushed tag path, which bumps all three
-  together before tagging. `test/manifest.test.js` checks they agree.
+  by hand — except for a hand-pushed release tag, which bumps all three together
+  before tagging (0.1.0 was set that way when leaving the template).
+  `test/manifest.test.js` checks they agree.
 - **Changelog.** Every user-visible change adds a line under `## [Unreleased]`
   in `CHANGELOG.md` (`### Added`, `Changed`, `Fixed`, `Removed`, `Security`).
   Never write a version heading: the Release workflow moves the section, and it
@@ -66,10 +74,9 @@ test/                             node --test, against the SDK's fake Gladys (in
   `label`, `description` and `placeholder` alike, never a plain string. The
   catalog `description` holds 10 to 100 characters per language. A field the
   older cores do not know needs a higher `gladys_version` minimum
-  (`categories`: 4.86.0; `widgets`, `scene_triggers`, `scene_actions`,
-  `type: "provider"`: 5.1.0). `test/manifest.test.js` ties the manifest to the
-  code (defaults, action, scene and widget handlers): change both sides
-  together.
+  (`type: "calendar"`: 5.2.0; `countries`: 5.3.0). `test/manifest.test.js`
+  ties the manifest to the code (defaults, bounds, keys, action handler):
+  change both sides together.
 - **User-facing text** is bilingual (English and French): action messages,
   manifest texts, and `docs/en.md` / `docs/fr.md`, kept in sync.
 - **Style.** Prettier formats, ESLint catches mistakes. Comments explain why,

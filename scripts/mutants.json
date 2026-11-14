@@ -1,0 +1,188 @@
+[
+  {
+    "name": "config: secret key accepted",
+    "file": "src/config.js",
+    "from": "if (/^oa_sk_/i.test(key)) return { ...out, problem: 'secret_key' };",
+    "to": ""
+  },
+  {
+    "name": "config: more than 10 agendas",
+    "file": "src/config.js",
+    "from": "if (out.refs.length >= MAX_AGENDAS) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "http: 401 not a refusal",
+    "file": "src/http.js",
+    "from": "    throw new SourceError('refused', 'OpenAgenda refused the key (401)', { status });",
+    "to": "    throw new SourceError('http', 'OpenAgenda refused the key (401)', { status });"
+  },
+  {
+    "name": "http: body not bounded",
+    "file": "src/http.js",
+    "from": "    if (size > limit) {",
+    "to": "    if (false) {"
+  },
+  {
+    "name": "openagenda: cancelled and postponed kept",
+    "file": "src/openagenda.js",
+    "from": "if (SKIPPED_STATUS.includes(status)) return { ...result, skipped: 1 };",
+    "to": ""
+  },
+  {
+    "name": "openagenda: time without zone accepted",
+    "file": "src/openagenda.js",
+    "from": "!ZONED.test(value)",
+    "to": "false"
+  },
+  {
+    "name": "openagenda: timing longer than 48 h kept",
+    "file": "src/openagenda.js",
+    "from": "|| end - start > MAX_TIMING",
+    "to": ""
+  },
+  {
+    "name": "openagenda: window filter removed",
+    "file": "src/openagenda.js",
+    "from": "if (!(start < to && (end > from || start >= from))) continue;",
+    "to": ""
+  },
+  {
+    "name": "openagenda: credit cut with the summary",
+    "file": "src/openagenda.js",
+    "from": "EVENT_DESCRIPTION_MAX - credit.length - 2",
+    "to": "EVENT_DESCRIPTION_MAX"
+  },
+  {
+    "name": "windows: straddlers left out",
+    "file": "src/windows.js",
+    "from": "export const overlaps = (o, from, to) => o.start < to && (o.end > from || o.start >= from);",
+    "to": "export const overlaps = (o, from, to) => o.start < to && o.start >= from;"
+  },
+  {
+    "name": "app: only the first page",
+    "file": "src/app.js",
+    "from": "if (!after || result.events.length === 0) break;",
+    "to": "break;"
+  },
+  {
+    "name": "app: read without the attempt in /data",
+    "file": "src/app.js",
+    "from": "if (!(await this.save())) {\n      src.failures += 1;",
+    "to": "if (false) {\n      src.failures += 1;"
+  },
+  {
+    "name": "app: attempt not restored",
+    "file": "src/app.js",
+    "from": "if (src.attemptAt !== undefined) src.attemptMono = mono - Math.min(now - src.attemptAt, DAY);",
+    "to": ""
+  },
+  {
+    "name": "app: pause not restored",
+    "file": "src/app.js",
+    "from": "if (pause && Number.isFinite(pause.until) && pause.until > now) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "app: request during a pause",
+    "file": "src/app.js",
+    "from": "    if (this.pause && this.pause.due > this.monotonic()) {\n      throw new SourceError('rate_limited', 'paused');",
+    "to": "    if (false) {\n      throw new SourceError('rate_limited', 'paused');"
+  },
+  {
+    "name": "app: pause end waits the interval",
+    "file": "src/app.js",
+    "from": "if (src.error === 'rate_limited' || src.error === 'server') return 0;",
+    "to": ""
+  },
+  {
+    "name": "app: refusal on the agendas list ignored",
+    "file": "src/app.js",
+    "from": "if (err.key === this.config.key) await this.refuseKey(err.key);",
+    "to": ""
+  },
+  {
+    "name": "app: 403 on an agenda refuses the key",
+    "file": "src/app.js",
+    "from": "await this.ask(gen, keyTestUrl());",
+    "to": "throw Object.assign(new SourceError('refused', 'x'), { key: this.config.key });"
+  },
+  {
+    "name": "app: refused tag not checked",
+    "file": "src/app.js",
+    "from": "return tagOf(this.refused.salt, this.config.key) === this.refused.tag;",
+    "to": "return false;"
+  },
+  {
+    "name": "app: no write limit",
+    "file": "src/app.js",
+    "from": "if (this.writes.length < WRITES_PER_MINUTE) {",
+    "to": "if (true) {"
+  },
+  {
+    "name": "app: Gladys 429 not retried",
+    "file": "src/app.js",
+    "from": "if (!(await this.sleep(GLADYS_RETRY, gen))) return 'stopped';\n          continue;",
+    "to": "return 'failed';"
+  },
+  {
+    "name": "app: delete before the names are read",
+    "file": "src/app.js",
+    "from": "if (this.resolved(account)) {",
+    "to": "if (true) {"
+  },
+  {
+    "name": "app: cap not applied",
+    "file": "src/app.js",
+    "from": "      occurrences.length = max;\n",
+    "to": "\n"
+  },
+  {
+    "name": "app: failure back-off ignored",
+    "file": "src/app.js",
+    "from": "return Math.min(RETRY_STEPS[Math.min(src.failures, RETRY_STEPS.length) - 1], interval);",
+    "to": "return 0;"
+  },
+  {
+    "name": "app: /data read without bound",
+    "file": "src/app.js",
+    "from": "if (result.status === 'unreadable') {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "app: test button too often",
+    "file": "src/app.js",
+    "from": "if (wait > 0) return T.testTooSoon",
+    "to": "if (false) return T.testTooSoon"
+  },
+  {
+    "name": "app: an answer sent before a pause lifts it",
+    "file": "src/app.js",
+    "from": "if (this.pause && this.pause.due <= this.monotonic()) this.pause = undefined;",
+    "to": "this.pause = undefined;"
+  },
+  {
+    "name": "app: private agenda left unnamed",
+    "file": "src/app.js",
+    "from": "if (!found.some((a) => a.uid === uid)) {",
+    "to": "if (false) {"
+  },
+  {
+    "name": "app: cap stops at the first full page",
+    "file": "src/app.js",
+    "from": "if (occurrences[max - 1].start <= pageFirst) {",
+    "to": "if (true) {"
+  },
+  {
+    "name": "app: sources forgotten at once",
+    "file": "src/app.js",
+    "from": "if (src.attemptAt === undefined || now - src.attemptAt >= DAY) this.sources.delete(key);",
+    "to": "this.sources.delete(key);"
+  },
+  {
+    "name": "app: calendars Gladys lost not sent again",
+    "file": "src/app.js",
+    "from": "for (const id of [...this.sent.keys()]) if (!this.calendars.has(id)) this.sent.delete(id);",
+    "to": ""
+  }
+]
