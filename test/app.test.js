@@ -58,7 +58,7 @@ test('an agenda followed by link: named, read once, its occurrences in a private
     assert.equal(r.headers.key, KEY);
     assert.match(
       r.headers['User-Agent'],
-      /^gladys-openagenda\/0\.1\.0 \(\+https:\/\/github\.com\/LM1LC3N7\/gladys-openagenda\)$/,
+      /^gladys-openagenda\/\d+\.\d+\.\d+ \(\+https:\/\/github\.com\/LM1LC3N7\/gladys-openagenda\)$/,
     );
     assert.ok(!r.url.includes(KEY), 'never in the URL');
     assert.equal(r.init.redirect, 'error');
